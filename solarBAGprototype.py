@@ -178,13 +178,13 @@ def makePolyData(input_surfaces, geom):
         flist.append([3, i, i+1, i+2])
         i+=3
 
-    print(vlist, flist)
+    # print(vlist, flist)
 
     # Transform the vertex and face lists to pyvista's PolyData format.
     mesh = pv.PolyData(vlist,flist)
-    print("Number of points in mesh:", mesh.n_points)
-    print("Points in mesh:", mesh.points)
-    print("Indices:", mesh.surface_indices)
+    # print("Number of points in mesh:", mesh.n_points)
+    # print("Points in mesh:", mesh.points)
+    # print("Indices:", mesh.surface_indices)
 
     # Clean the data from duplicates.
     mesh = mesh.clean()
@@ -212,7 +212,7 @@ def process_building(count, bdg, transformation_object):
     wall_mesh = makePolyData(walls, geom)
 
     # print("Mesh: ", mesh)
-    print("Number of points in roof mesh after cleaning:", roof_mesh.n_points)
+    # print("Number of points in roof mesh after cleaning:", roof_mesh.n_points)
     
     # density = 0.001 # for whole buildings
     density = 0.75     # for roofs only
@@ -220,7 +220,7 @@ def process_building(count, bdg, transformation_object):
     # Sample the triangles into a grid of points. 
     # The lower the density value, the less space will be between the points, increasing the sampling density.
     grid = create_surface_grid(roof_mesh, density)
-    print("Length of grid:", len(grid))
+    # print("Length of grid:", len(grid))
     # print("Grid:", grid)
 
     # grid_points = []
