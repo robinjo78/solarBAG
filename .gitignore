@@ -1,7 +1,7 @@
 # Ignore vtk-related files
-.vtk
-.vtm
+*.vtk
+*.vtm
 
 # Ignore folders
 mesh
-_pycache_
+__pycache__
