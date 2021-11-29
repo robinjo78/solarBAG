@@ -15,7 +15,7 @@ import solarpy as sp
 import time
 import multiprocessing as mp
 
-from um3d.shape_index import create_surface_grid
+from shape_index import create_surface_grid
 
 # FUNCTIONS GO HERE:
 # Computes the bbox of a list of geometries (triangles of a building)
@@ -305,7 +305,7 @@ def main():
     # Load the CityJSON file from a path.
     # path = "C:\\Users\\hurkm\\Documents\\TU\\Geomatics\\Jaar 2\\GEO2020 - Msc Thesis\\Data\\CityJSON_tiles\\3dbag_v21031_7425c21b_3007.json"
     # linux path:
-    path = "/mnt/c/Users/hurkm/Documents/TU/Geomatics/Jaar 2/GEO2020 - Msc Thesis/Data/CityJSON_tiles/3dbag_v21031_7425c21b_3007.json"
+    path = "/mnt/c/Users/hurkm/repos/solarBAG/data/3dbag_v21031_7425c21b_3007.json"
     cm = cityjson.load(path)
 
     # Transform from indices to the real coordinates/values.
