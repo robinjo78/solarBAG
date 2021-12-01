@@ -3,5 +3,6 @@
 *.vtm
 
 # Ignore folders
+cm
 mesh
 __pycache__

@@ -152,13 +152,14 @@ def create_colormap(sol_irr):
     return color_map
     
 def makePolyData(input_surfaces, geom):
-    # Get the real coordinate boundaries of the roof surfaces.
-    surfaces = []
-    for s in input_surfaces.values():
-        surfaces.append(geom.get_surface_boundaries(s))
-    
-    # Unpack the generator object into a list of roof surfaces.
-    surfaces = list(surfaces[0])
+    # Get the real coordinate boundaries of the surfaces.
+    surfaces = [geom.get_surface_boundaries(s) for s in input_surfaces.values()]
+    # print(surfaces)
+
+    # Unpack the generator object into a list of surfaces.
+    unpacked_surfaces = []
+    for g in surfaces:
+        unpacked_surfaces.extend(list(g))
 
     vlist = []
     flist = []
@@ -166,7 +167,7 @@ def makePolyData(input_surfaces, geom):
     # This is done for all surfaces, not only roof surfaces.
     # This way is not efficient. Find a way without duplicate vertices.
     # - Take the original way it is stored in CityJSON. Probably not possible. Is another way of indexing.
-    for boundary in surfaces:
+    for boundary in unpacked_surfaces:
         plane = boundary[0]
         v1 = plane[0]
         v2 = plane[2]
@@ -192,7 +193,10 @@ def makePolyData(input_surfaces, geom):
     return mesh
 
 def process_building(count, bdg, transformation_object):
+    print("building:", bdg)
+    
     geom = bdg.geometry[2]
+    # print(geom.surfaces)
 
     # Transform from indices to the real coordinates/values.
     # NOTE: this can be done at once when loading the city model.
@@ -205,7 +209,6 @@ def process_building(count, bdg, transformation_object):
     roofs = geom.get_surfaces(type='roofsurface')
     floors = geom.get_surfaces(type='groundsurface')
     walls = geom.get_surfaces(type='wallsurface')
-    # print(list(roofs.values())[0]['surface_idx'])
 
     roof_mesh = makePolyData(roofs, geom)
     floor_mesh = makePolyData(floors, geom)
@@ -223,19 +226,19 @@ def process_building(count, bdg, transformation_object):
     # print("Length of grid:", len(grid))
     # print("Grid:", grid)
 
-    # grid_points = []
-    # grid_indices = []
-    # for g in grid:
-    #     grid_points.extend(g[0])
-    #     grid_indices.append(g[1])
+    grid_points = []
+    grid_indices = []
+    for g in grid:
+        grid_points.extend(g[0])
+        grid_indices.append(g[1])
 
     # print(grid_points)
     # print(grid_indices)
 
     # FIND OUT HOW TO STORE THE LINK TO THE TRIANGLE IN EACH GRID POINT.
-    # grid = pv.PolyData(grid_points)
+    grid = pv.PolyData(grid_points)
 
-    # mesh = mesh.merge(grid)
+    roof_mesh = roof_mesh.merge(grid)
 
     # Compute the normals of the surface triangles.
     roof_mesh = roof_mesh.compute_normals()
@@ -262,8 +265,8 @@ def process_building(count, bdg, transformation_object):
 
     print("Processed building: {}, fid: {}".format(count, bdg.id))
 
-    # return mesh_block
     return mesh_block
+    # return mesh
 
 def test_one_building(buildings, tr_obj, start_time):
     # Take out one building.
