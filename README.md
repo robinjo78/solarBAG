@@ -3,7 +3,7 @@ MSc thesis Geomatics on computing solar potential for large CityJSON datasets.
 
 ## Usage
 
-Run the script by using WSL or Linus terminal:
+Run the script by using WSL or Linux terminal:
 ```
 python3 solarBAGprototype.py
 ```
