@@ -238,7 +238,7 @@ def process_building(count, bdg, transformation_object):
     # FIND OUT HOW TO STORE THE LINK TO THE TRIANGLE IN EACH GRID POINT.
     grid = pv.PolyData(grid_points)
 
-    roof_mesh = roof_mesh.merge(grid)
+    # roof_mesh = roof_mesh.merge(grid)
 
     # Compute the normals of the surface triangles.
     roof_mesh = roof_mesh.compute_normals()
@@ -246,7 +246,6 @@ def process_building(count, bdg, transformation_object):
     # FIND OUT HOW TO ACCESS AND UPDATE THE ATTRIBUTES LIKE THE NORMALS. 
 
     # TODO put the values of the normals to each point in the corresponding triangle.
-
 
     vnorms = roof_mesh['Normals']
 
@@ -261,7 +260,7 @@ def process_building(count, bdg, transformation_object):
     # mesh = floor_mesh.merge((wall_mesh, roof_mesh))
     # mesh = roof_mesh.boolean_union(floor_mesh)
 
-    mesh_block = pv.MultiBlock((roof_mesh, floor_mesh, wall_mesh))
+    mesh_block = pv.MultiBlock((roof_mesh, floor_mesh, wall_mesh, grid))
 
     print("Processed building: {}, fid: {}".format(count, bdg.id))
 
