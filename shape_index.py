@@ -1,6 +1,7 @@
 """Module that computes indexes for shapely (2D) and polydata (3D) shapes"""
 
 import math
+from numpy.lib.polynomial import poly
 from shapely.geometry import Point, MultiPoint, Polygon
 from helpers.geometry import surface_normal
 from helpers.mesh import to_pymesh, to_pyvista, intersect
@@ -171,6 +172,7 @@ def create_surface_grid(mesh, density=1):
         grid = MultiPoint(grid).intersection(poly_2d)
         
         if grid.is_empty:
+            result.append((to_3d(poly_2d.centroid.coords, normal, pts[0]), i))
             continue
         elif grid.geom_type == "Point":
             grid = np.array(grid.coords)
@@ -180,8 +182,6 @@ def create_surface_grid(mesh, density=1):
         # TODO: Randomise the origin
         # result.extend(list(to_3d(grid, normal, pts[0])))
         result.append((to_3d(grid, normal, pts[0]), i))
-
-        # print("List of points: ", list(to_3d(grid, normal, pts[0])), i)
             
     return result
 

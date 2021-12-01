@@ -152,11 +152,10 @@ def create_colormap(sol_irr):
     return color_map
     
 def makePolyData(input_surfaces, geom):
-    # Get the real coordinate boundaries of the surfaces.
+    # Get the real coordinate boundaries of the surfaces. These are stored as generator objects.
     surfaces = [geom.get_surface_boundaries(s) for s in input_surfaces.values()]
-    # print(surfaces)
 
-    # Unpack the generator object into a list of surfaces.
+    # Unpack the generator object into a list of surfaces with real coordinates.
     unpacked_surfaces = []
     for g in surfaces:
         unpacked_surfaces.extend(list(g))
@@ -164,8 +163,7 @@ def makePolyData(input_surfaces, geom):
     vlist = []
     flist = []
     i = 0
-    # This is done for all surfaces, not only roof surfaces.
-    # This way is not efficient. Find a way without duplicate vertices.
+    # Index the surfaces and store as vertex and face lists. This is done for all surfaces.
     # - Take the original way it is stored in CityJSON. Probably not possible. Is another way of indexing.
     for boundary in unpacked_surfaces:
         plane = boundary[0]
@@ -179,13 +177,8 @@ def makePolyData(input_surfaces, geom):
         flist.append([3, i, i+1, i+2])
         i+=3
 
-    # print(vlist, flist)
-
     # Transform the vertex and face lists to pyvista's PolyData format.
     mesh = pv.PolyData(vlist,flist)
-    # print("Number of points in mesh:", mesh.n_points)
-    # print("Points in mesh:", mesh.points)
-    # print("Indices:", mesh.surface_indices)
 
     # Clean the data from duplicates.
     mesh = mesh.clean()
@@ -193,7 +186,7 @@ def makePolyData(input_surfaces, geom):
     return mesh
 
 def process_building(count, bdg, transformation_object):
-    print("building:", bdg)
+    # print("building:", bdg)
     
     geom = bdg.geometry[2]
     # print(geom.surfaces)
@@ -213,9 +206,6 @@ def process_building(count, bdg, transformation_object):
     roof_mesh = makePolyData(roofs, geom)
     floor_mesh = makePolyData(floors, geom)
     wall_mesh = makePolyData(walls, geom)
-
-    # print("Mesh: ", mesh)
-    # print("Number of points in roof mesh after cleaning:", roof_mesh.n_points)
     
     # density = 0.001 # for whole buildings
     density = 0.75     # for roofs only
@@ -223,8 +213,6 @@ def process_building(count, bdg, transformation_object):
     # Sample the triangles into a grid of points. 
     # The lower the density value, the less space will be between the points, increasing the sampling density.
     grid = create_surface_grid(roof_mesh, density)
-    # print("Length of grid:", len(grid))
-    # print("Grid:", grid)
 
     grid_points = []
     grid_indices = []
