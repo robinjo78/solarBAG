@@ -3,6 +3,7 @@
 *.vtm
 
 # Ignore folders
+citymodel
 cm
 mesh
 __pycache__

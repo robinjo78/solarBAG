@@ -278,12 +278,14 @@ def test_multiple_buildings(buildings, tr_obj, start_time):
 
     # Process all buildings in a list of buildings by using list comprehension with multiprocessing.
     # Start parallelisation:
-    pool = mp.Pool(mp.cpu_count()-2)
-    result = pool.starmap(process_building, [(count, buildings[fid], tr_obj) for count, fid in enumerate(bdg_list, 1)])
-    pool.close()
+    # pool = mp.Pool(mp.cpu_count()-2)
+    # result = pool.map(process_building, [(count, buildings[fid], tr_obj) for count, fid in enumerate(bdg_list, 1)])
+    # pool.close()
+
+    result = [process_building(count, buildings[fid], tr_obj) for count, fid in enumerate(bdg_list, 1)]
 
     block = pv.MultiBlock(result)
-    block.save("cm.vtm")
+    block.save("citymodel.vtm")
 
     print("Time to run this script: {} seconds".format(time.time() - start_time))
 
@@ -309,8 +311,8 @@ def main():
     # rtree_idx = create_rtree(buildings, transformation_object)
 
     # Call functions that manipulate the geometries
-    test_one_building(buildings, transformation_object, start_time)
-    # test_multiple_buildings(buildings, transformation_object, start_time)
+    # test_one_building(buildings, transformation_object, start_time)
+    test_multiple_buildings(buildings, transformation_object, start_time)
 
 if __name__ == "__main__":
     freeze_support()
