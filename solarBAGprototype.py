@@ -230,10 +230,11 @@ def process_building(count, bdg, transformation_object):
 
     # Compute the normals of the surface triangles.
     roof_mesh = roof_mesh.compute_normals()
-    # print(mesh["Normals"])
+
     # FIND OUT HOW TO ACCESS AND UPDATE THE ATTRIBUTES LIKE THE NORMALS. 
 
     # TODO put the values of the normals to each point in the corresponding triangle.
+
 
     vnorms = roof_mesh['Normals']
 
@@ -247,13 +248,11 @@ def process_building(count, bdg, transformation_object):
 
     # mesh = floor_mesh.merge((wall_mesh, roof_mesh))
     # mesh = roof_mesh.boolean_union(floor_mesh)
+    # mesh_block = pv.MultiBlock((roof_mesh, floor_mesh, wall_mesh, grid))
 
-    mesh_block = pv.MultiBlock((roof_mesh, floor_mesh, wall_mesh, grid))
+    # print("Processed building: {}, fid: {}".format(count, bdg.id))
 
-    print("Processed building: {}, fid: {}".format(count, bdg.id))
-
-    return mesh_block
-    # return mesh
+    return (roof_mesh, floor_mesh, wall_mesh, grid)
 
 def test_one_building(buildings, tr_obj, start_time):
     # Take out one building.
@@ -264,7 +263,8 @@ def test_one_building(buildings, tr_obj, start_time):
     bdg = buildings[fid]
 
     # Process one building. Compute the necessary attributes for the surfaces and store in mesh.
-    mesh_block = process_building(1, bdg, tr_obj)
+    roof, wall, floor, grid = process_building(1, bdg, tr_obj)
+    mesh_block = pv.MultiBlock((roof, floor, wall, grid))
 
     # Save the mesh to vtk format.
     mesh_block.save("mesh.vtm")
@@ -274,7 +274,7 @@ def test_one_building(buildings, tr_obj, start_time):
 
 # Now, it is approximately 4x faster with multiprocessing because I do not transform the whole dataset to real coordinates anymore within the loop.
 def test_multiple_buildings(buildings, tr_obj, start_time):
-    bdg_list = list(buildings.keys())[:20]
+    bdg_list = list(buildings.keys())[:500]
 
     # Process all buildings in a list of buildings by using list comprehension with multiprocessing.
     # Start parallelisation:
@@ -282,11 +282,31 @@ def test_multiple_buildings(buildings, tr_obj, start_time):
     # result = pool.map(process_building, [(count, buildings[fid], tr_obj) for count, fid in enumerate(bdg_list, 1)])
     # pool.close()
 
-    result = [process_building(count, buildings[fid], tr_obj) for count, fid in enumerate(bdg_list, 1)]
+    from concurrent.futures import ProcessPoolExecutor
+    from tqdm import tqdm
 
-    block = pv.MultiBlock(result)
-    block.save("citymodel.vtm")
+    with ProcessPoolExecutor(max_workers= mp.cpu_count()-2) as pool:
+        with tqdm(total=len(bdg_list)) as progress:
+            futures = []
 
+            for count, fid in enumerate(bdg_list, 1):
+                future = pool.submit(process_building, count, buildings[fid], tr_obj)
+                future.add_done_callback(lambda p: progress.update())
+                
+                roof, wall, floor, grid = future.result()
+                mesh_block = pv.MultiBlock((roof, floor, wall, grid))
+                futures.append(mesh_block)
+
+            # print(futures)
+
+            block = pv.MultiBlock(futures)
+            block.save("citymodel.vtm")
+
+            # for future in futures:
+            #     print(future)
+
+    # result = [process_building(count, buildings[fid], tr_obj) for count, fid in enumerate(bdg_list, 1)]
+    
     print("Time to run this script: {} seconds".format(time.time() - start_time))
 
 # THE MAIN WORKFLOW BELOW:
@@ -311,8 +331,8 @@ def main():
     # rtree_idx = create_rtree(buildings, transformation_object)
 
     # Call functions that manipulate the geometries
-    # test_one_building(buildings, transformation_object, start_time)
-    test_multiple_buildings(buildings, transformation_object, start_time)
+    test_one_building(buildings, transformation_object, start_time)
+    # test_multiple_buildings(buildings, transformation_object, start_time)
 
 if __name__ == "__main__":
     freeze_support()
