@@ -274,7 +274,7 @@ def test_one_building(buildings, tr_obj, start_time):
 
 # Now, it is approximately 4x faster with multiprocessing because I do not transform the whole dataset to real coordinates anymore within the loop.
 def test_multiple_buildings(buildings, tr_obj, start_time):
-    bdg_list = list(buildings.keys())[:500]
+    bdg_list = list(buildings.keys())
 
     # Process all buildings in a list of buildings by using list comprehension with multiprocessing.
     # Start parallelisation:
@@ -300,7 +300,7 @@ def test_multiple_buildings(buildings, tr_obj, start_time):
             # print(futures)
 
             block = pv.MultiBlock(futures)
-            block.save("citymodel.vtm")
+            block.save("citymodel_full.vtm")
 
             # for future in futures:
             #     print(future)
@@ -331,8 +331,8 @@ def main():
     # rtree_idx = create_rtree(buildings, transformation_object)
 
     # Call functions that manipulate the geometries
-    test_one_building(buildings, transformation_object, start_time)
-    # test_multiple_buildings(buildings, transformation_object, start_time)
+    # test_one_building(buildings, transformation_object, start_time)
+    test_multiple_buildings(buildings, transformation_object, start_time)
 
 if __name__ == "__main__":
     freeze_support()

@@ -4,6 +4,7 @@
 
 # Ignore folders
 citymodel
+citymodel_full
 cm
 mesh
 __pycache__
