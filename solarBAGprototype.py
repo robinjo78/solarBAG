@@ -3,6 +3,7 @@ from multiprocessing.spawn import freeze_support
 from pickle import NONE
 from matplotlib.colors import ListedColormap
 from pyvista import set_plot_theme
+from pyvista.core import grid
 import rtree
 set_plot_theme('document')
 
@@ -151,7 +152,7 @@ def create_colormap(sol_irr):
 
     return color_map
     
-def makePolyData(input_surfaces, geom):
+def makePolyData_semantic_surface(input_surfaces, geom):
     # Get the real coordinate boundaries of the surfaces. These are stored as generator objects.
     surfaces = [geom.get_surface_boundaries(s) for s in input_surfaces.values()]
 
@@ -185,7 +186,33 @@ def makePolyData(input_surfaces, geom):
 
     return mesh
 
-def process_building(count, bdg, transformation_object):
+def makePolyData_all_surfaces(input_surfaces):
+    vlist = []
+    flist = []
+    i = 0
+    # Index the surfaces and store as vertex and face lists. This is done for all surfaces.
+    # - Take the original way it is stored in CityJSON. Probably not possible. Is another way of indexing.
+    for boundary in input_surfaces:
+        plane = boundary[0]
+        v1 = plane[0]
+        v2 = plane[2]
+        v3 = plane[1]
+
+        vlist.append(v1)
+        vlist.append(v2)
+        vlist.append(v3)
+        flist.append([3, i, i+1, i+2])
+        i+=3
+
+    # Transform the vertex and face lists to pyvista's PolyData format.
+    mesh = pv.PolyData(vlist,flist)
+
+    # Clean the data from duplicates.
+    mesh = mesh.clean()
+
+    return mesh
+
+def process_building(bdg, transformation_object):
     # print("building:", bdg)
     
     geom = bdg.geometry[2]
@@ -193,66 +220,55 @@ def process_building(count, bdg, transformation_object):
 
     # Transform from indices to the real coordinates/values.
     # NOTE: this can be done at once when loading the city model.
-    geom_tr = geom.transform(transformation_object)
+    # geom_tr = geom.transform(transformation_object)
 
     # Extract all surfaces from the geometry.
-    # surfaces = geom_tr.get_surfaces()[0]
+    surfaces = geom.get_surfaces()[0]
+    mesh = makePolyData_all_surfaces(surfaces)
 
     # Extract only roof surfaces from the geometry.
     roofs = geom.get_surfaces(type='roofsurface')
-    floors = geom.get_surfaces(type='groundsurface')
-    walls = geom.get_surfaces(type='wallsurface')
 
-    roof_mesh = makePolyData(roofs, geom)
-    floor_mesh = makePolyData(floors, geom)
-    wall_mesh = makePolyData(walls, geom)
+    roof_mesh = makePolyData_semantic_surface(roofs, geom)
+
+    # Compute the normals of the roof surface triangles.
+    roof_mesh = roof_mesh.compute_normals()
+
+    vnorms = roof_mesh['Normals']
+
+    # Compute solar irradiation per triangle.
+    sol_irr = irradiance_on_triangles(vnorms)
     
     # density = 0.001 # for whole buildings
     density = 0.75     # for roofs only
 
     # Sample the triangles into a grid of points. 
     # The lower the density value, the less space will be between the points, increasing the sampling density.
-    grid = create_surface_grid(roof_mesh, density)
+    grid_points = create_surface_grid(roof_mesh, density)
 
-    grid_points = []
-    grid_indices = []
-    for g in grid:
-        grid_points.extend(g[0])
-        grid_indices.append(g[1])
-
-    # print(grid_points)
-    # print(grid_indices)
-
-    # FIND OUT HOW TO STORE THE LINK TO THE TRIANGLE IN EACH GRID POINT.
-    grid = pv.PolyData(grid_points)
-
-    # roof_mesh = roof_mesh.merge(grid)
-
-    # Compute the normals of the surface triangles.
-    roof_mesh = roof_mesh.compute_normals()
-
-    # FIND OUT HOW TO ACCESS AND UPDATE THE ATTRIBUTES LIKE THE NORMALS. 
+    solar_roof_grid = []
 
     # TODO put the values of the normals to each point in the corresponding triangle.
+    # DONE!
+    for tuple in grid_points:
+        gridded_triangle = pv.PolyData(tuple[0])
+        index = tuple[1]
+        sol_val = sol_irr[index]
 
+        gridded_triangle.add_field_data(sol_val, "solar irradiation")
 
-    vnorms = roof_mesh['Normals']
+        solar_roof_grid.append(gridded_triangle)    
+    
+    # print(solar_roof_grid)
 
-    # Compute solar irradiation per triangle.
-    sol_irr = irradiance_on_triangles(vnorms)
-    # print(sol_irr, count)
+    # FIND OUT HOW TO STORE THE LINK TO THE TRIANGLE IN EACH GRID POINT.
+    # grid = pv.PolyData(grid_points)
 
-    # Add the solar irradiance values as attribute to the surface triangles
-    # This is used at visualisation.
-    roof_mesh["Sol value"] = sol_irr
+    # Add the solar irradiance values as attribute to the surface triangles. This was the previous solution.
+    # roof_mesh["Sol value"] = sol_irr
 
-    # mesh = floor_mesh.merge((wall_mesh, roof_mesh))
-    # mesh = roof_mesh.boolean_union(floor_mesh)
-    # mesh_block = pv.MultiBlock((roof_mesh, floor_mesh, wall_mesh, grid))
-
-    # print("Processed building: {}, fid: {}".format(count, bdg.id))
-
-    return (roof_mesh, floor_mesh, wall_mesh, grid)
+    # return (roof_mesh, floor_mesh, wall_mesh, grid)
+    return (mesh, solar_roof_grid)
 
 def test_one_building(buildings, tr_obj, start_time):
     # Take out one building.
@@ -263,18 +279,20 @@ def test_one_building(buildings, tr_obj, start_time):
     bdg = buildings[fid]
 
     # Process one building. Compute the necessary attributes for the surfaces and store in mesh.
-    roof, wall, floor, grid = process_building(1, bdg, tr_obj)
-    mesh_block = pv.MultiBlock((roof, floor, wall, grid))
+    # roof, wall, floor, grid = process_building(bdg, tr_obj)
+    # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
+    mesh, grid = process_building(bdg, tr_obj)
+    mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid)))
 
     # Save the mesh to vtk format.
-    mesh_block.save("mesh.vtm")
+    mesh_block.save("mesh_sol_grid.vtm")
 
     # Print the time the script took.
     print("Time to run this script: {} seconds".format(time.time() - start_time))
 
 # Now, it is approximately 4x faster with multiprocessing because I do not transform the whole dataset to real coordinates anymore within the loop.
 def test_multiple_buildings(buildings, tr_obj, start_time):
-    bdg_list = list(buildings.keys())
+    bdg_list = list(buildings.keys())[:50]
 
     # Process all buildings in a list of buildings by using list comprehension with multiprocessing.
     # Start parallelisation:
@@ -290,17 +308,19 @@ def test_multiple_buildings(buildings, tr_obj, start_time):
             futures = []
 
             for count, fid in enumerate(bdg_list, 1):
-                future = pool.submit(process_building, count, buildings[fid], tr_obj)
+                future = pool.submit(process_building, buildings[fid], tr_obj)
                 future.add_done_callback(lambda p: progress.update())
                 
-                roof, wall, floor, grid = future.result()
-                mesh_block = pv.MultiBlock((roof, floor, wall, grid))
+                # roof, wall, floor, grid = future.result()
+                # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
+                mesh, grid = future.result()
+                mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid)))
                 futures.append(mesh_block)
 
             # print(futures)
 
             block = pv.MultiBlock(futures)
-            block.save("citymodel_full.vtm")
+            block.save("citymodel_sol_grid.vtm")
 
             # for future in futures:
             #     print(future)
@@ -331,8 +351,8 @@ def main():
     # rtree_idx = create_rtree(buildings, transformation_object)
 
     # Call functions that manipulate the geometries
-    # test_one_building(buildings, transformation_object, start_time)
-    test_multiple_buildings(buildings, transformation_object, start_time)
+    test_one_building(buildings, transformation_object, start_time)
+    # test_multiple_buildings(buildings, transformation_object, start_time)
 
 if __name__ == "__main__":
     freeze_support()

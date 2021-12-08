@@ -5,6 +5,8 @@
 # Ignore folders
 citymodel
 citymodel_full
+citymodel_sol_grid
 cm
 mesh
+mesh_sol_grid
 __pycache__
