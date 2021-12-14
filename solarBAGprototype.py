@@ -3,7 +3,6 @@ from multiprocessing.spawn import freeze_support
 from pickle import NONE
 from matplotlib.colors import ListedColormap
 from pyvista import set_plot_theme
-from pyvista.core import grid
 import rtree
 set_plot_theme('document')
 
@@ -79,19 +78,6 @@ def create_rtree(buildings, tr_obj):
 
     return rtree_idx
 
-# Not functional yet. Look into script of Stelios.
-# Or skip sampling and make use of computing and projecting shadows right away.
-# Samples a triangle into a regular grid of points.
-def sample_triangle(A, B, C):
-    y_A = A[1]
-    x_B = B[0]
-
-    x_diff = np.abs(A[0] - B[0])
-    # print(x_diff)
-
-    offset_pt = [x_B, y_A, A[2]]
-    return offset_pt
-
 # Performs ray tracing to find an intersection between the sun and a building.
 def find_intersection():
     # Use the pyvista ray_trace function. (Using the position of the sun at characteristic declination)
@@ -112,6 +98,7 @@ def compute_graph_area(G):
 def irradiance_on_triangles(vnorms):
     date = dt.datetime(2019, 7, 5)
     lat = 52  # Delft
+    lng = 4.36 # Delft
     h = 0
 
     # Look at finding position of the sun to do ray tracing.
@@ -122,6 +109,14 @@ def irradiance_on_triangles(vnorms):
     for vnorm in vnorms:
         t = [date + dt.timedelta(minutes=i) for i in range(0, 15 * 24 * 4, 15)]
         G = [sp.irradiance_on_plane(vnorm, h, i, lat) for i in t]
+
+        # Compute the solar vector in a local geodetic horizon reference frame (NED - North, East, Down).
+        # vsol_ned = [sp.solar_vector_ned(date, lat) for date in t]
+        # print(vsol_ned[10:25])
+
+        # Convert the solar vector from NED to geocentric coordinates (ECEF)
+        # vsol_ecef = [sp.ned2ecef(v, lat, lng) for v in vsol_ned]
+        # print(vsol_ecef[10:250])
 
         res = compute_graph_area(G)
         res_list.append(res)
@@ -212,6 +207,19 @@ def makePolyData_all_surfaces(input_surfaces):
 
     return mesh
 
+def save_sun_path(point):
+    date = dt.datetime(2019, 7, 5)
+    lat = 52  # Delft
+
+    t = [date + dt.timedelta(minutes=i) for i in range(0, 15 * 24 * 4, 15)]
+
+    # Compute for each point the corresponding position of the sun at a factor x away for a certain time interval.
+    vsol_ned = [point + sp.solar_vector_ned(date, lat) * -200 for date in t]
+
+    sun_path = pv.PolyData(vsol_ned)
+    return sun_path
+
+
 def process_building(bdg, transformation_object):
     # print("building:", bdg)
     
@@ -246,18 +254,36 @@ def process_building(bdg, transformation_object):
     # The lower the density value, the less space will be between the points, increasing the sampling density.
     grid_points = create_surface_grid(roof_mesh, density)
 
-    solar_roof_grid = []
+    # Specify the neigbhouring buildings to check while ray tracing.
+    # Add buildings satisfying the criteria in this set.
+    # Now a placeholder.
+    # neighbours = pv.Sphere()
+    neighbours = mesh
 
-    # TODO put the values of the normals to each point in the corresponding triangle.
-    # DONE!
+    solar_roof_grid = []
+    sun_paths_mesh = []
+    # Process each gridded triangle of the roof of the current building
     for tuple in grid_points:
+        sun_paths_triangle = []
+        # TODO call the ray tracing function here for each point in the current tuple (triangle)
+        for point in tuple[0]:
+            sun_path = save_sun_path(point)
+            sun_paths_triangle.append(sun_path)
+            # print(sun_path)
+            # Following are placeholders for now.
+            # NOTE: ray tracing with its own building always gives back an intersection point?
+            intersection_point, intersection_cell = neighbours.ray_trace(sun_path.points[35], point, first_point=True)
+            
+            if len(intersection_point) > 0:
+                print("Intersection found:", point)
         gridded_triangle = pv.PolyData(tuple[0])
         index = tuple[1]
         sol_val = sol_irr[index]
 
         gridded_triangle.add_field_data(sol_val, "solar irradiation")
 
-        solar_roof_grid.append(gridded_triangle)    
+        solar_roof_grid.append(gridded_triangle)
+        sun_paths_mesh.extend(sun_paths_triangle)    
     
     # print(solar_roof_grid)
 
@@ -268,7 +294,8 @@ def process_building(bdg, transformation_object):
     # roof_mesh["Sol value"] = sol_irr
 
     # return (roof_mesh, floor_mesh, wall_mesh, grid)
-    return (mesh, solar_roof_grid)
+    # return (mesh, solar_roof_grid)
+    return (mesh, solar_roof_grid, sun_paths_mesh)
 
 def test_one_building(buildings, tr_obj, start_time):
     # Take out one building.
@@ -281,11 +308,11 @@ def test_one_building(buildings, tr_obj, start_time):
     # Process one building. Compute the necessary attributes for the surfaces and store in mesh.
     # roof, wall, floor, grid = process_building(bdg, tr_obj)
     # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
-    mesh, grid = process_building(bdg, tr_obj)
-    mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid)))
+    mesh, grid, sun_path = process_building(bdg, tr_obj)
+    mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(sun_path)))
 
     # Save the mesh to vtk format.
-    mesh_block.save("mesh_sol_grid.vtm")
+    mesh_block.save("mesh_sol_grid_sun_path.vtm")
 
     # Print the time the script took.
     print("Time to run this script: {} seconds".format(time.time() - start_time))
@@ -315,6 +342,9 @@ def test_multiple_buildings(buildings, tr_obj, start_time):
                 # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
                 mesh, grid = future.result()
                 mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid)))
+                # mesh, grid, sun_path = future.result()
+                # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(sun_path)))
+                
                 futures.append(mesh_block)
 
             # print(futures)

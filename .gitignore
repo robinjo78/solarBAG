@@ -9,4 +9,8 @@ citymodel_sol_grid
 cm
 mesh
 mesh_sol_grid
+mesh_sol_grid_sun_path
 __pycache__
+
+# Ignore certain scripts
+test.py
