@@ -211,7 +211,7 @@ def save_sun_path(point):
     date = dt.datetime(2019, 7, 5)
     lat = 52  # Delft
 
-    t = [date + dt.timedelta(minutes=i) for i in range(0, 15 * 24 * 4, 15)]
+    t = [date + dt.timedelta(minutes=i) for i in range(0, 60 * 24, 60)]
 
     # Compute for each point the corresponding position of the sun at a factor x away for a certain time interval.
     vsol_ned = [point + sp.solar_vector_ned(date, lat) * -200 for date in t]
@@ -262,9 +262,13 @@ def process_building(bdg, transformation_object):
 
     solar_roof_grid = []
     sun_paths_mesh = []
+    ray_lists_mesh = []
+    intersection_list_mesh = []
     # Process each gridded triangle of the roof of the current building
     for tuple in grid_points:
         sun_paths_triangle = []
+        ray_lists_triangle = []
+        intersection_list_triangle = []
         # TODO call the ray tracing function here for each point in the current tuple (triangle)
         for point in tuple[0]:
             sun_path = save_sun_path(point)
@@ -272,10 +276,27 @@ def process_building(bdg, transformation_object):
             # print(sun_path)
             # Following are placeholders for now.
             # NOTE: ray tracing with its own building always gives back an intersection point?
-            intersection_point, intersection_cell = neighbours.ray_trace(sun_path.points[35], point, first_point=True)
             
-            if len(intersection_point) > 0:
-                print("Intersection found:", point)
+            # intersection_point, intersection_cell = neighbours.ray_trace(sun_path.points[20], point, first_point=True)
+            
+
+            # if len(intersection_point) > 0:
+            #     print("Intersection found:", point)
+            ray_list = []
+            intersection_list = []
+            for p in sun_path.points:
+                ray = pv.Line(p, point)
+                ray_list.append(ray)
+
+                intersection_point, intersection_cell = neighbours.ray_trace(p, point, first_point=True)
+                # print(intersection_point, p)
+                if len(intersection_point) > 0:
+                    intersection_list.append(intersection_point)
+
+            ray_list = pv.MultiBlock(ray_list)    
+            ray_lists_triangle.append(ray_list)
+            intersection_list_triangle.append(pv.PolyData(intersection_list))
+
         gridded_triangle = pv.PolyData(tuple[0])
         index = tuple[1]
         sol_val = sol_irr[index]
@@ -283,7 +304,9 @@ def process_building(bdg, transformation_object):
         gridded_triangle.add_field_data(sol_val, "solar irradiation")
 
         solar_roof_grid.append(gridded_triangle)
-        sun_paths_mesh.extend(sun_paths_triangle)    
+        sun_paths_mesh.extend(sun_paths_triangle)  
+        ray_lists_mesh.extend(ray_lists_triangle)  
+        intersection_list_mesh.extend(intersection_list_triangle)
     
     # print(solar_roof_grid)
 
@@ -295,7 +318,8 @@ def process_building(bdg, transformation_object):
 
     # return (roof_mesh, floor_mesh, wall_mesh, grid)
     # return (mesh, solar_roof_grid)
-    return (mesh, solar_roof_grid, sun_paths_mesh)
+    # return (mesh, solar_roof_grid, sun_paths_mesh, ray_lists_mesh)
+    return (mesh, solar_roof_grid, sun_paths_mesh[20], ray_lists_mesh[20], intersection_list_mesh[20])
 
 def test_one_building(buildings, tr_obj, start_time):
     # Take out one building.
@@ -308,8 +332,9 @@ def test_one_building(buildings, tr_obj, start_time):
     # Process one building. Compute the necessary attributes for the surfaces and store in mesh.
     # roof, wall, floor, grid = process_building(bdg, tr_obj)
     # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
-    mesh, grid, sun_path = process_building(bdg, tr_obj)
-    mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(sun_path)))
+    mesh, grid, sun_path, ray_list, intersection_list = process_building(bdg, tr_obj)
+    # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(sun_path), pv.MultiBlock(ray_list)))
+    mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), sun_path, ray_list, intersection_list))
 
     # Save the mesh to vtk format.
     mesh_block.save("mesh_sol_grid_sun_path.vtm")
@@ -378,7 +403,13 @@ def main():
     buildings = cm.get_cityobjects(type='building')
 
     # Create rtree for further processing
-    # rtree_idx = create_rtree(buildings, transformation_object)
+    rtree_idx = create_rtree(buildings, transformation_object)
+    print(type(rtree_idx))
+
+    # HOW TO find suitable neighbours:
+    # Use a query window to find the neighbours I want in the rtree
+    # list(rtree_idx.intersection((x1, y1, z1, x2, y2, z2)))
+    # Take x, y, z values as the x, y, z values of the point + the offset (100 m?) I am processing
 
     # Call functions that manipulate the geometries
     test_one_building(buildings, transformation_object, start_time)

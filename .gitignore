@@ -10,6 +10,7 @@ cm
 mesh
 mesh_sol_grid
 mesh_sol_grid_sun_path
+mesh_sol_grid_sun_path_rays
 __pycache__
 
 # Ignore certain scripts
