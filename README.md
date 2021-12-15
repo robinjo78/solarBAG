@@ -12,4 +12,4 @@ Alter the path variable in *solarBAGprototype.py* to your own path in which the 
 
 Visualise the output *.vtm* or *.vtk* file in ParaView.
 
-![alt text](https://github.com/robinjo78/solarBAG/blob/main/images/Screenshot_mesh_grid_centroid.png?raw=true)
+![alt text](https://github.com/robinjo78/solarBAG/blob/main/images/Screenshot_mesh_solar_grid.png?raw=true)
