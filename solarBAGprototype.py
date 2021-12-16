@@ -266,60 +266,80 @@ def process_building(bdg, transformation_object):
     intersection_list_mesh = []
     # Process each gridded triangle of the roof of the current building
     for tuple in grid_points:
+        points = tuple[0]
+        index = tuple[1]
+
+        sol_val = sol_irr[index]
+
+        gridded_triangle = []
         sun_paths_triangle = []
         ray_lists_triangle = []
         intersection_list_triangle = []
         # TODO call the ray tracing function here for each point in the current tuple (triangle)
-        for point in tuple[0]:
+        for point in points:
             sun_path = save_sun_path(point)
             sun_paths_triangle.append(sun_path)
             # print(sun_path)
-            # Following are placeholders for now.
-            # NOTE: ray tracing with its own building always gives back an intersection point?
-            
-            # intersection_point, intersection_cell = neighbours.ray_trace(sun_path.points[20], point, first_point=True)
-            
 
-            # if len(intersection_point) > 0:
-            #     print("Intersection found:", point)
+            # NOTE: ray tracing with its own building always gives back an intersection point? --> NO
+            # It did this sometimes as the sampled points did sometimes lie below the triangular surface, meaning an intersection was always found.
+            
             ray_list = []
-            intersection_list = []
+            intersection_point_list = []
             for p in sun_path.points:
                 ray = pv.Line(p, point)
                 ray_list.append(ray)
 
                 intersection_point, intersection_cell = neighbours.ray_trace(p, point, first_point=True)
+
                 # print(intersection_point, p)
-                if len(intersection_point) > 0:
-                    intersection_list.append(intersection_point)
+                if any(intersection_point):
+                    intersection_point_list.append(intersection_point)
+
+            point = pv.PolyData(point)
+            point.add_field_data(len(intersection_point_list), "intersection count")
+
+            # TODO: make sol_val different based on the intersection count
+            point.add_field_data(sol_val, "solar irradiation")
+            
+            gridded_triangle.append(point)
+            # print(intersection_count)
+            # print(len(intersection_point_list))
 
             ray_list = pv.MultiBlock(ray_list)    
             ray_lists_triangle.append(ray_list)
-            intersection_list_triangle.append(pv.PolyData(intersection_list))
+            intersection_list_triangle.append(pv.PolyData(intersection_point_list))
+            # print("intersection list: ", intersection_list)
 
-        gridded_triangle = pv.PolyData(tuple[0])
-        index = tuple[1]
-        sol_val = sol_irr[index]
+        # gridded_triangle = pv.PolyData(processed_points)
+        # sol_val = sol_irr[index]
 
-        gridded_triangle.add_field_data(sol_val, "solar irradiation")
+        # gridded_triangle.add_field_data(sol_val, "solar irradiation")
 
-        solar_roof_grid.append(gridded_triangle)
+        # solar_roof_grid.append(pv.MultiBlock(gridded_triangle))
+        solar_roof_grid.extend(gridded_triangle)
         sun_paths_mesh.extend(sun_paths_triangle)  
         ray_lists_mesh.extend(ray_lists_triangle)  
         intersection_list_mesh.extend(intersection_list_triangle)
+        # print(len(solar_roof_grid))
+        # print(len(sun_paths_mesh))
+        # print(len(ray_lists_mesh))
+        # print(len(intersection_list_mesh))
     
     # print(solar_roof_grid)
-
-    # FIND OUT HOW TO STORE THE LINK TO THE TRIANGLE IN EACH GRID POINT.
-    # grid = pv.PolyData(grid_points)
 
     # Add the solar irradiance values as attribute to the surface triangles. This was the previous solution.
     # roof_mesh["Sol value"] = sol_irr
 
+    # print(len(sun_paths_mesh))
+    # print(len(ray_lists_mesh))
+    # print(len(intersection_list_mesh))
+
     # return (roof_mesh, floor_mesh, wall_mesh, grid)
     # return (mesh, solar_roof_grid)
-    # return (mesh, solar_roof_grid, sun_paths_mesh, ray_lists_mesh)
-    return (mesh, solar_roof_grid, sun_paths_mesh[20], ray_lists_mesh[20], intersection_list_mesh[20])
+    return (mesh, solar_roof_grid, sun_paths_mesh, ray_lists_mesh, intersection_list_mesh)
+    # b_i = 81
+    # return (mesh, solar_roof_grid, sun_paths_mesh[b_i], ray_lists_mesh[b_i], intersection_list_mesh[b_i])
 
 def test_one_building(buildings, tr_obj, start_time):
     # Take out one building.
@@ -334,10 +354,13 @@ def test_one_building(buildings, tr_obj, start_time):
     # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
     mesh, grid, sun_path, ray_list, intersection_list = process_building(bdg, tr_obj)
     # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(sun_path), pv.MultiBlock(ray_list)))
-    mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), sun_path, ray_list, intersection_list))
+    mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersection_list)))
+    # print(intersection_list.points)
+    # print(grid[81].points)
 
     # Save the mesh to vtk format.
-    mesh_block.save("mesh_sol_grid_sun_path.vtm")
+    # mesh_block.save("mesh_sol_grid_sun_path_intersections.vtm")
+    mesh_block.save("mesh_intersections_test.vtm")
 
     # Print the time the script took.
     print("Time to run this script: {} seconds".format(time.time() - start_time))

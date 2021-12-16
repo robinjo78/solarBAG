@@ -170,9 +170,12 @@ def create_surface_grid(mesh, density=1):
         
         grid = create_grid_2d(poly_2d, density)
         grid = MultiPoint(grid).intersection(poly_2d)
+
+        # Define an offset in z-direction for the points, otherwise pyvista's ray tracing function will fail.
+        offset = [0, 0, 0.01]
         
         if grid.is_empty:
-            result.append((to_3d(poly_2d.centroid.coords, normal, pts[0]), i))
+            result.append((to_3d(poly_2d.centroid.coords, normal, pts[0]) + offset, i))
             continue
         elif grid.geom_type == "Point":
             grid = np.array(grid.coords)
@@ -181,7 +184,9 @@ def create_surface_grid(mesh, density=1):
         
         # TODO: Randomise the origin
         # result.extend(list(to_3d(grid, normal, pts[0])))
-        result.append((to_3d(grid, normal, pts[0]), i))
+        # result.append((to_3d(grid, normal, pts[0]), i))
+        # print(to_3d(grid, normal, pts[0]))
+        result.append((to_3d(grid, normal, pts[0] + offset), i))
             
     return result
 
