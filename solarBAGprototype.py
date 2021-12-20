@@ -3,6 +3,7 @@ from multiprocessing.spawn import freeze_support
 from pickle import NONE
 from matplotlib.colors import ListedColormap
 from pyvista import set_plot_theme
+from pyvista.core import objects
 import rtree
 set_plot_theme('document')
 
@@ -66,13 +67,15 @@ def create_rtree(buildings, tr_obj):
         geom_tr = geom.transform(tr_obj)
 
         # Extract surfaces from the geometry.
-        surfaces = geom_tr.get_surfaces()[0]
+        # surfaces = geom_tr.get_surfaces()[0]
+        surfaces = geom.get_surfaces()[0]
 
         # Compute the bounding box of a building from the surfaces.
         bbox = compute_bbox(surfaces)
+        # print(bbox)
 
         # Insert the bbox into the rtree with corresponding id 'fid'.
-        rtree_idx.insert(bdg.attributes['fid'], bbox)
+        rtree_idx.insert(int(bdg.id), bbox)
 
     print("Size of the Rtree: {}".format(rtree_idx.get_size()))
 
@@ -125,27 +128,6 @@ def irradiance_on_triangles(vnorms):
         # area = integrate(G,2)
         # print("area: {}".format(area))
     return res_list
-
-# This function is not used now.
-def create_colormap(sol_irr):
-    # Create color map for solar irradiation values.
-    black = np.array([11/256, 11/256, 11/256, 1])
-    green = np.array([0, 255/256, 0, 1])
-    yellow = np.array([255/256, 245/256, 0, 1])
-    orange = np.array([255/256, 165/256, 0, 1])
-    red = np.array([1, 0, 0, 1])
-
-    mapping = np.linspace(np.min(sol_irr), np.max(sol_irr), 256)
-    newcolors = np.empty((256, 4))
-    newcolors[mapping >= np.max(sol_irr)*0.8] = red
-    newcolors[mapping < np.max(sol_irr)*0.8] = orange
-    newcolors[mapping < np.max(sol_irr)*0.6] = yellow
-    newcolors[mapping < np.max(sol_irr)*0.4] = green
-    newcolors[mapping < np.max(sol_irr)*0.05] = black
-
-    color_map = ListedColormap(newcolors)
-
-    return color_map
     
 def makePolyData_semantic_surface(input_surfaces, geom):
     # Get the real coordinate boundaries of the surfaces. These are stored as generator objects.
@@ -207,6 +189,40 @@ def makePolyData_all_surfaces(input_surfaces):
 
     return mesh
 
+# Find the neighbours corresponding to a building with a certain offset in meters
+def find_neighbours(roof_mesh, rtree, buildings, offset):
+    roof_mesh_center = roof_mesh.center_of_mass()
+
+    print(roof_mesh_center)
+    x1 = roof_mesh_center[0] - offset
+    x2 = roof_mesh_center[0] + offset
+    y1 = roof_mesh_center[1] - offset
+    y2 = roof_mesh_center[1] + offset
+    z1 = roof_mesh_center[2] - offset
+    z2 = roof_mesh_center[2] + offset
+    print(x1, y1, z1, x2, y2, z2)
+
+    hits = list(rtree.intersection((x1, y1, z1, x2, y2, z2), objects=True))
+
+    neighbour_list = []
+
+    for item in hits:
+        # get the id of the current item and look this up in de buildings dict of cityjson
+        # then make a polydata mesh out of it and it it to the list of meshes: the neigbhours.
+        # then the neighbours can be ray traced
+        
+        neighbour_building = buildings[str(item.id)]
+
+        neighbour_geom = neighbour_building.geometry[2]
+        neighbour_surfaces = neighbour_geom.get_surfaces()[0]
+        neighbour_mesh = makePolyData_all_surfaces(neighbour_surfaces)
+
+        neighbour_list.append(neighbour_mesh)
+    
+    neighbours = neighbour_list[0].merge(neighbour_list[1:])
+
+    return neighbours
+
 def save_sun_path(point):
     date = dt.datetime(2019, 7, 5)
     lat = 52  # Delft
@@ -220,7 +236,7 @@ def save_sun_path(point):
     return sun_path
 
 
-def process_building(bdg, transformation_object):
+def process_building(bdg, rtree, buildings, transformation_object):
     # print("building:", bdg)
     
     geom = bdg.geometry[2]
@@ -258,7 +274,14 @@ def process_building(bdg, transformation_object):
     # Add buildings satisfying the criteria in this set.
     # Now a placeholder.
     # neighbours = pv.Sphere()
-    neighbours = mesh
+
+    # TODO: NEXT STEP INCLUDE NEIGHBOURS!!!
+
+    # HOW TO find suitable neighbours:
+    # Use a query window to find the neighbours I want in the rtree
+    # list(rtree_idx.intersection((x1, y1, z1, x2, y2, z2)))
+    # Take x, y, z values as the x, y, z values of the point + the offset (100 m?) I am processing
+    neighbours = find_neighbours(roof_mesh, rtree, buildings, 150)
 
     solar_roof_grid = []
     sun_paths_mesh = []
@@ -337,30 +360,34 @@ def process_building(bdg, transformation_object):
 
     # return (roof_mesh, floor_mesh, wall_mesh, grid)
     # return (mesh, solar_roof_grid)
-    return (mesh, solar_roof_grid, sun_paths_mesh, ray_lists_mesh, intersection_list_mesh)
+    # return (mesh, solar_roof_grid, sun_paths_mesh, ray_lists_mesh, intersection_list_mesh)
+    return (mesh, solar_roof_grid, sun_paths_mesh, ray_lists_mesh, intersection_list_mesh, neighbours)
+    
     # b_i = 81
     # return (mesh, solar_roof_grid, sun_paths_mesh[b_i], ray_lists_mesh[b_i], intersection_list_mesh[b_i])
 
-def test_one_building(buildings, tr_obj, start_time):
+def test_one_building(buildings, rtree, tr_obj, start_time):
     # Take out one building.
     # fid = "254" # This is just a block/cube
     # fid = "18918"
     fid = "25774"
     # fid = "138790"
     bdg = buildings[fid]
+    print(bdg.attributes["fid"])
 
     # Process one building. Compute the necessary attributes for the surfaces and store in mesh.
     # roof, wall, floor, grid = process_building(bdg, tr_obj)
     # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
-    mesh, grid, sun_path, ray_list, intersection_list = process_building(bdg, tr_obj)
+    # mesh, grid, sun_path, ray_list, intersection_list = process_building(bdg, rtree, buildings, tr_obj)
+    mesh, grid, sun_path, ray_list, intersection_list, neighbours = process_building(bdg, rtree, buildings, tr_obj)
     # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(sun_path), pv.MultiBlock(ray_list)))
-    mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersection_list)))
+    mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersection_list), neighbours))
     # print(intersection_list.points)
     # print(grid[81].points)
 
     # Save the mesh to vtk format.
     # mesh_block.save("mesh_sol_grid_sun_path_intersections.vtm")
-    mesh_block.save("mesh_intersections_test.vtm")
+    mesh_block.save("mesh_intersections_test_neighbours.vtm")
 
     # Print the time the script took.
     print("Time to run this script: {} seconds".format(time.time() - start_time))
@@ -429,13 +456,8 @@ def main():
     rtree_idx = create_rtree(buildings, transformation_object)
     print(type(rtree_idx))
 
-    # HOW TO find suitable neighbours:
-    # Use a query window to find the neighbours I want in the rtree
-    # list(rtree_idx.intersection((x1, y1, z1, x2, y2, z2)))
-    # Take x, y, z values as the x, y, z values of the point + the offset (100 m?) I am processing
-
     # Call functions that manipulate the geometries
-    test_one_building(buildings, transformation_object, start_time)
+    test_one_building(buildings, rtree_idx, transformation_object, start_time)
     # test_multiple_buildings(buildings, transformation_object, start_time)
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ cm
 mesh
 mesh_intersection_points
 mesh_intersections_test
+mesh_intersections_test_neighbours
 mesh_sol_grid
 mesh_sol_grid_sun_path_intersections
 mesh_sol_grid_sun_path_rays
