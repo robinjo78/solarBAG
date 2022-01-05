@@ -3,18 +3,17 @@
 *.vtm
 
 # Ignore folders
-citymodel
 citymodel_full
 citymodel_sol_grid
-cm
-mesh
-mesh_intersection_points
 mesh_intersections_test
 mesh_intersections_test_neighbours
+mesh_intersections_test_neighbours_2
 mesh_sol_grid
-mesh_sol_grid_sun_path_intersections
 mesh_sol_grid_sun_path_rays
+mesh_sol_grid_sun_path_rays_2
+mesh_tr_intersections_test_neighbours
 __pycache__
 
 # Ignore certain scripts
 test.py
+cupy_test.py
