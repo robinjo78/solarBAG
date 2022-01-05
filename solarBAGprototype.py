@@ -71,12 +71,6 @@ def create_rtree(buildings, tr_obj):
 
     return rtree_idx
 
-# Performs ray tracing to find an intersection between the sun and a building.
-def find_intersection():
-    # Use the pyvista ray_trace function. (Using the position of the sun at characteristic declination)
-    # Look at rendering shadows in the scene: https://docs.pyvista.org/examples/04-lights/shadows.html
-    return None
-
 # Function to compute the area of the graph to get Wh/m^2/day.
 def compute_graph_area(G):
     res = 0
@@ -220,12 +214,10 @@ def process_building(bdg, rtree, buildings, transformation_object):
 
     # Extract only roof surfaces from the geometry.
     roofs = geom.get_surfaces(type='roofsurface')
-
     roof_mesh = makePolyData_semantic_surface(roofs, geom)
 
     # Compute the normals of the roof surface triangles.
     roof_mesh = roof_mesh.compute_normals()
-
     vnorms = roof_mesh['Normals']
 
     # Compute solar irradiation per triangle.
@@ -250,6 +242,7 @@ def process_building(bdg, rtree, buildings, transformation_object):
         points = tuple[0]
         index = tuple[1]
 
+        # Get the solar value belonging to the current triangle.
         sol_val = sol_irr[index]
 
         gridded_triangle = []
@@ -268,11 +261,12 @@ def process_building(bdg, rtree, buildings, transformation_object):
             
             ray_list = []
             intersection_point_list = []
-            for p in sun_path.points:
-                ray = pv.Line(p, point)
+            for sun_point in sun_path.points:
+                ray = pv.Line(sun_point, point)
                 ray_list.append(ray)
 
-                intersection_point, intersection_cell = neighbours.ray_trace(p, point, first_point=True)
+                # Find a possible intersection point between the current position of the sun and the current point of a triangle.
+                intersection_point, _ = neighbours.ray_trace(sun_point, point, first_point=True)
 
                 if any(intersection_point):
                     intersection_point_list.append(intersection_point)
