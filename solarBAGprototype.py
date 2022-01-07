@@ -54,11 +54,15 @@ def create_rtree(buildings, tr_obj):
     for bdg in buildings.values():
         # Take the LoD 2.2 geometry of the building.
         geom = bdg.geometry[2]
+        # geom = bdg.geometry[0]
+        # print(geom.boundaries[0][0])
         
         # Transform the geometry to real coordinates.
         geom_tr = geom.transform(tr_obj)
+        # print(geom_tr.boundaries[0][0])
 
         # Extract surfaces from the geometry.
+        # surfaces = geom.get_surfaces()
         surfaces = geom.get_surfaces()[0]
 
         # Compute the bounding box of a building from the surfaces.
@@ -300,7 +304,7 @@ def test_one_building(buildings, rtree, tr_obj, start_time):
     mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersection_list), neighbours))
 
     # Save the mesh to vtk format.
-    mesh_block.save("mesh_tr_intersections_test_neighbours.vtm")
+    mesh_block.save("mesh_intersections_test_neighbours_3dbag_update.vtm")
 
     # Print the time the script took.
     print("Time to run this script: {} seconds".format(time.time() - start_time))
@@ -353,7 +357,9 @@ def main():
     start_time = time.time()
 
     # Load the CityJSON file from a path.
-    path = "/mnt/c/Users/hurkm/repos/solarBAG/data/3dbag_v21031_7425c21b_3007.json" # a linux path
+    path = "/mnt/c/Users/hurkm/repos/solarBAG/data/3dbag_v21031_7425c21b_3007_v11.city.json" # a linux path
+    # path = "/mnt/c/Users/hurkm/repos/solarBAG/data/3dbag_v210908_fd2cee53_3007_new_v11_triangulated.city.json" # a linux path
+
     cm = cityjson.load(path)
 
     # Transform from indices to the real coordinates/values.
@@ -365,6 +371,7 @@ def main():
 
     # Create rtree for further processing
     rtree_idx = create_rtree(buildings, transformation_object)
+    # rtree_idx = index.Index()
 
     # Call functions that manipulate the geometries
     test_one_building(buildings, rtree_idx, transformation_object, start_time)
