@@ -41,6 +41,11 @@ def compute_bbox(list):
 
     return [xmin, ymin, zmin, xmax, ymax, zmax]
 
+def get_lod(bdg, lod):
+    for g in bdg.geometry:
+        if g.lod == lod:
+            return g
+
 # Creates and returns an rtree with buildings.
 def create_rtree(buildings, tr_obj):
     # set properties for the rtree index.
@@ -51,11 +56,10 @@ def create_rtree(buildings, tr_obj):
     rtree_idx = index.Index(properties=p)
 
     # Loop to dump all buildings in the rtree.
-    for bdg in buildings.values():
+    for i, bdg in enumerate(buildings.values(), 0):
         # Take the LoD 2.2 geometry of the building.
-        geom = bdg.geometry[2]
-        # geom = bdg.geometry[0]
-        # print(geom.boundaries[0][0])
+        # geom = bdg.geometry[2]
+        geom = get_lod(bdg, "2.2")
         
         # Transform the geometry to real coordinates.
         geom_tr = geom.transform(tr_obj)
@@ -69,7 +73,7 @@ def create_rtree(buildings, tr_obj):
         bbox = compute_bbox(surfaces)
 
         # Insert the bbox into the rtree with corresponding id 'fid'.
-        rtree_idx.insert(int(bdg.id), bbox)
+        rtree_idx.insert(i, bbox, bdg.id)
 
     print("Size of the Rtree: {}".format(rtree_idx.get_size()))
 
@@ -181,7 +185,8 @@ def find_neighbours(roof_mesh, rtree, buildings, offset):
         # Get the id of the current item and look this up in de buildings dict of cityjson
         # Then make a polydata mesh out of it and it it to the list of meshes: the neigbhours.
         # Then the neighbours can be ray traced.
-        neighbour_building = buildings[str(item.id)]
+        # neighbour_building = buildings[str(item.id)]
+        neighbour_building = buildings[item.object]
 
         neighbour_geom = neighbour_building.geometry[2]
         neighbour_surfaces = neighbour_geom.get_surfaces()[0]
@@ -200,7 +205,7 @@ def compute_sun_path(point):
     t = [date + dt.timedelta(minutes=i) for i in range(0, 60 * 24, 60)]
 
     # Compute for each point the corresponding position of the sun at a factor x away for a certain time interval.
-    vsol_ned = [point + sp.solar_vector_ned(date, lat) * -200 for date in t]
+    vsol_ned = [point + sp.solar_vector_ned(date, lat) * -500 for date in t]
 
     sun_path = pv.PolyData(vsol_ned)
     return sun_path
@@ -238,8 +243,8 @@ def process_building(bdg, rtree, buildings, transformation_object):
     neighbours = find_neighbours(roof_mesh, rtree, buildings, 150)
 
     solar_roof_grid = []
-    sun_paths_mesh = []
-    ray_lists_mesh = []
+    # sun_paths_mesh = []
+    # ray_lists_mesh = []
     intersection_list_mesh = []
     # Process each gridded triangle of the roof of the current building
     for tuple in grid_points:
@@ -250,24 +255,24 @@ def process_building(bdg, rtree, buildings, transformation_object):
         sol_val = sol_irr[index]
 
         gridded_triangle = []
-        sun_paths_triangle = []
-        ray_lists_triangle = []
+        # sun_paths_triangle = []
+        # ray_lists_triangle = []
         intersection_list_triangle = []
         # Process each point in the current triangle:
         # - create a sun path
         # - perform ray tracing to find a possible intersection between the current point and a point from the sun path
         for point in points:
             sun_path = compute_sun_path(point)
-            sun_paths_triangle.append(sun_path)
+            # sun_paths_triangle.append(sun_path)
 
             # NOTE: ray tracing with its own building always gives back an intersection point? --> NO
             # It did this sometimes as the sampled points did sometimes lie below the triangular surface, meaning an intersection was always found.
             
-            ray_list = []
+            # ray_list = []
             intersection_point_list = []
             for sun_point in sun_path.points:
-                ray = pv.Line(sun_point, point)
-                ray_list.append(ray)
+                # ray = pv.Line(sun_point, point)
+                # ray_list.append(ray)
 
                 # Find a possible intersection point between the current position of the sun and the current point of a triangle.
                 intersection_point, _ = neighbours.ray_trace(sun_point, point, first_point=True)
@@ -283,28 +288,34 @@ def process_building(bdg, rtree, buildings, transformation_object):
             
             gridded_triangle.append(point)
 
-            ray_list = pv.MultiBlock(ray_list)    
-            ray_lists_triangle.append(ray_list)
+            # ray_list = pv.MultiBlock(ray_list)    
+            # ray_lists_triangle.append(ray_list)
             intersection_list_triangle.append(pv.PolyData(intersection_point_list))
 
         solar_roof_grid.extend(gridded_triangle)
-        sun_paths_mesh.extend(sun_paths_triangle)  
-        ray_lists_mesh.extend(ray_lists_triangle)  
+        # sun_paths_mesh.extend(sun_paths_triangle)  
+        # ray_lists_mesh.extend(ray_lists_triangle)  
         intersection_list_mesh.extend(intersection_list_triangle)
 
-    return (mesh, solar_roof_grid, sun_paths_mesh, ray_lists_mesh, intersection_list_mesh, neighbours)
+    # return (mesh, solar_roof_grid, sun_paths_mesh, ray_lists_mesh, intersection_list_mesh, neighbours)
+    return (mesh, solar_roof_grid, intersection_list_mesh, neighbours)
 
 def test_one_building(buildings, rtree, tr_obj, start_time):
     # Take out one building.
-    fid = "25774"
-    bdg = buildings[fid]
+    # fid = "25774"
+    # bdg = buildings[fid]
+    id = "NL.IMBAG.Pand.0503100000031377-0"
+    bdg = buildings[id]
 
     # Process one building. Compute the necessary attributes for the surfaces and store in mesh.
-    mesh, grid, sun_path, ray_list, intersection_list, neighbours = process_building(bdg, rtree, buildings, tr_obj)
+    # mesh, grid, sun_path, ray_list, intersection_list, neighbours = process_building(bdg, rtree, buildings, tr_obj)
+    mesh, grid, intersection_list, neighbours = process_building(bdg, rtree, buildings, tr_obj)
     mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersection_list), neighbours))
+    # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersection_list), neighbours, pv.MultiBlock(ray_list), pv.MultiBlock(sun_path)))
+
 
     # Save the mesh to vtk format.
-    mesh_block.save("mesh_intersections_test_neighbours_3dbag_update.vtm")
+    mesh_block.save("mesh_intersections_test_neighbours_3dbag_update_2.vtm")
 
     # Print the time the script took.
     print("Time to run this script: {} seconds".format(time.time() - start_time))
@@ -357,8 +368,8 @@ def main():
     start_time = time.time()
 
     # Load the CityJSON file from a path.
-    path = "/mnt/c/Users/hurkm/repos/solarBAG/data/3dbag_v21031_7425c21b_3007_v11.city.json" # a linux path
-    # path = "/mnt/c/Users/hurkm/repos/solarBAG/data/3dbag_v210908_fd2cee53_3007_new_v11_triangulated.city.json" # a linux path
+    # path = "/mnt/c/Users/hurkm/repos/solarBAG/data/3dbag_v21031_7425c21b_3007_v11.city.json" # a linux path
+    path = "/mnt/c/Users/hurkm/repos/solarBAG/data/3dbag_v210908_fd2cee53_3007_new_v11_triangulated.city.json" # a linux path
 
     cm = cityjson.load(path)
 
@@ -367,7 +378,7 @@ def main():
     transformation_object = cm.transform
 
     # Get the buildings from the city model as dict (there are only buildings).
-    buildings = cm.get_cityobjects(type='building')
+    buildings = cm.get_cityobjects(type='BuildingPart')
 
     # Create rtree for further processing
     rtree_idx = create_rtree(buildings, transformation_object)
