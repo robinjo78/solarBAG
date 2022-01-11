@@ -179,6 +179,8 @@ def find_neighbours(roof_mesh, rtree, buildings, offset):
 
     hits = list(rtree.intersection((x1, y1, z1, x2, y2, z2), objects=True))
 
+    # print(hits)
+
     neighbour_list = []
 
     for item in hits:
@@ -194,9 +196,13 @@ def find_neighbours(roof_mesh, rtree, buildings, offset):
 
         neighbour_list.append(neighbour_mesh)
     
-    neighbours = neighbour_list[0].merge(neighbour_list[1:])
-
-    return neighbours
+    if any(hits):
+        neighbours = neighbour_list[0].merge(neighbour_list[1:])
+        return neighbours
+    else:
+        # Should be building itself? OR should not happen at all??
+        neighbours = roof_mesh
+        return neighbours
 
 def compute_sun_path(point):
     date = dt.datetime(2019, 7, 5)
@@ -212,6 +218,7 @@ def compute_sun_path(point):
 
 def process_building(bdg, rtree, buildings, transformation_object):
     geom = bdg.geometry[2]
+    print(bdg.id)
 
     # Transform from indices to the real coordinates/values.
     # NOTE: this can be done at once when loading the city model.
@@ -233,7 +240,8 @@ def process_building(bdg, rtree, buildings, transformation_object):
     sol_irr = irradiance_on_triangles(vnorms)
     
     # density = 0.001 # for whole buildings
-    density = 0.75     # for roofs only
+    # density = 0.75     # for roofs only
+    density = 1.5
 
     # Sample the triangles into a grid of points. 
     # The lower the density value, the less space will be between the points, increasing the sampling density.
@@ -265,16 +273,16 @@ def process_building(bdg, rtree, buildings, transformation_object):
             sun_path = compute_sun_path(point)
             # sun_paths_triangle.append(sun_path)
 
-            # NOTE: ray tracing with its own building always gives back an intersection point? --> NO
-            # It did this sometimes as the sampled points did sometimes lie below the triangular surface, meaning an intersection was always found.
+        #     # NOTE: ray tracing with its own building always gives back an intersection point? --> NO
+        #     # It did this sometimes as the sampled points did sometimes lie below the triangular surface, meaning an intersection was always found.
             
-            # ray_list = []
+        #     # ray_list = []
             intersection_point_list = []
             for sun_point in sun_path.points:
-                # ray = pv.Line(sun_point, point)
-                # ray_list.append(ray)
+        #         # ray = pv.Line(sun_point, point)
+        #         # ray_list.append(ray)
 
-                # Find a possible intersection point between the current position of the sun and the current point of a triangle.
+        #         # Find a possible intersection point between the current position of the sun and the current point of a triangle.
                 intersection_point, _ = neighbours.ray_trace(sun_point, point, first_point=True)
 
                 if any(intersection_point):
@@ -283,13 +291,13 @@ def process_building(bdg, rtree, buildings, transformation_object):
             point = pv.PolyData(point)
             point.add_field_data(len(intersection_point_list), "intersection count")
 
-            # TODO: make sol_val different based on the intersection count
+        #     # TODO: make sol_val different based on the intersection count
             point.add_field_data(sol_val, "solar irradiation")
             
             gridded_triangle.append(point)
 
-            # ray_list = pv.MultiBlock(ray_list)    
-            # ray_lists_triangle.append(ray_list)
+        #     # ray_list = pv.MultiBlock(ray_list)    
+        #     # ray_lists_triangle.append(ray_list)
             intersection_list_triangle.append(pv.PolyData(intersection_point_list))
 
         solar_roof_grid.extend(gridded_triangle)
@@ -299,13 +307,31 @@ def process_building(bdg, rtree, buildings, transformation_object):
 
     # return (mesh, solar_roof_grid, sun_paths_mesh, ray_lists_mesh, intersection_list_mesh, neighbours)
     return (mesh, solar_roof_grid, intersection_list_mesh, neighbours)
+    # return (mesh, solar_roof_grid)
 
 def test_one_building(buildings, rtree, tr_obj, start_time):
     # Take out one building.
     # fid = "25774"
     # bdg = buildings[fid]
-    id = "NL.IMBAG.Pand.0503100000031377-0"
-    bdg = buildings[id]
+    # id = "NL.IMBAG.Pand.0503100000000018-0"
+    # id2 = "NL.IMBAG.Pand.0503100000031377-0"
+    id3 = "NL.IMBAG.Pand.0503100000031378-0"
+
+    # bdg_list = [id2, id3]
+
+    # blocks = []
+    # for id in bdg_list:
+    #     mesh, grid, intersection_list, neighbours = process_building(buildings[id], rtree, buildings, tr_obj)
+    #     mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersection_list), neighbours))
+    #     # mesh_block.save("mesh_test_{}.vtm".format(id))
+    #     blocks.append(mesh_block)
+
+    # block = pv.MultiBlock((blocks))
+
+    # block.save("two_meshes_test.vtm")
+
+
+    bdg = buildings[id3]
 
     # Process one building. Compute the necessary attributes for the surfaces and store in mesh.
     # mesh, grid, sun_path, ray_list, intersection_list, neighbours = process_building(bdg, rtree, buildings, tr_obj)
@@ -321,8 +347,17 @@ def test_one_building(buildings, rtree, tr_obj, start_time):
     print("Time to run this script: {} seconds".format(time.time() - start_time))
 
 # Now, it is approximately 4x faster with multiprocessing because I do not transform the whole dataset to real coordinates anymore within the loop.
-def test_multiple_buildings(buildings, tr_obj, start_time):
-    bdg_list = list(buildings.keys())[:50]
+def test_multiple_buildings(buildings, rtree, tr_obj, start_time):
+    bdg_list = list(buildings.keys())[:5]
+
+    # id = "NL.IMBAG.Pand.0503100000031377-0"
+    # id2 = "NL.IMBAG.Pand.0503100000031378-0"
+    # id3 = "NL.IMBAG.Pand.0503100000031379-0"
+    # id4 = "NL.IMBAG.Pand.0503100000031380-0"
+    # id5 = "NL.IMBAG.Pand.0503100000031381-0"
+    # id6 = "NL.IMBAG.Pand.0503100000031382-0"
+
+    # bdg_list = [id, id2, id3, id4, id5, id6]
 
     # Process all buildings in a list of buildings by using list comprehension with multiprocessing.
     # Start parallelisation:
@@ -330,33 +365,36 @@ def test_multiple_buildings(buildings, tr_obj, start_time):
     # result = pool.map(process_building, [(count, buildings[fid], tr_obj) for count, fid in enumerate(bdg_list, 1)])
     # pool.close()
 
-    from concurrent.futures import ProcessPoolExecutor
+    from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
     from tqdm import tqdm
 
-    with ProcessPoolExecutor(max_workers= mp.cpu_count()-2) as pool:
-        with tqdm(total=len(bdg_list)) as progress:
-            futures = []
+    futures = []
 
-            for count, fid in enumerate(bdg_list, 1):
-                future = pool.submit(process_building, buildings[fid], tr_obj)
+    with ThreadPoolExecutor(max_workers= mp.cpu_count()-2) as pool:
+        # The library tqdm is used to display a progress bar in the terminal.
+        with tqdm(total=len(bdg_list)) as progress:
+            # futures = []
+
+            for id in bdg_list:
+                future = pool.submit(process_building, buildings[id], rtree, buildings, tr_obj)
                 future.add_done_callback(lambda p: progress.update())
+
+                # print(future)
                 
                 # roof, wall, floor, grid = future.result()
                 # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
-                mesh, grid = future.result()
-                mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid)))
+                mesh, grid, intersections, neighbours = future.result() # CHECK WHAT ERROR HAPPENS HERE!
+                # mesh, grid = future.result()
+                mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersections), neighbours))
                 # mesh, grid, sun_path = future.result()
                 # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(sun_path)))
                 
                 futures.append(mesh_block)
 
-            # print(futures)
+    # print(futures)
 
-            block = pv.MultiBlock(futures)
-            block.save("citymodel_sol_grid.vtm")
-
-            # for future in futures:
-            #     print(future)
+    block = pv.MultiBlock(futures)
+    block.save("citymodel_sol_grid_3dbag_update_test_2.vtm")
 
     # result = [process_building(count, buildings[fid], tr_obj) for count, fid in enumerate(bdg_list, 1)]
     
@@ -385,9 +423,9 @@ def main():
     # rtree_idx = index.Index()
 
     # Call functions that manipulate the geometries
-    test_one_building(buildings, rtree_idx, transformation_object, start_time)
-    # test_multiple_buildings(buildings, transformation_object, start_time)
+    # test_one_building(buildings, rtree_idx, transformation_object, start_time)
+    test_multiple_buildings(buildings, rtree_idx, transformation_object, start_time)
 
 if __name__ == "__main__":
-    freeze_support()
+    # freeze_support()
     main()
