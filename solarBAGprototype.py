@@ -67,7 +67,7 @@ def create_rtree(buildings):
         surfaces = geom.get_surfaces()[0]
 
         # Compute the bounding box of a building from the surfaces.
-        bbox = compute_bbox(surfaces)
+        bbox = compute_bbox(surfaces) # Might use cityjson.get_bbox function here (see script Stelios)
 
         # Insert the bbox into the rtree with corresponding id 'fid'.
         rtree_idx.insert(i, bbox, bdg.id)
@@ -179,7 +179,7 @@ def find_neighbours(roof_mesh, rtree, buildings, offset):
     # hits = list(rtree.intersection((x1, y1, z1, x2, y2, z2), objects='raw'))
     # hits = list(rtree.intersection((x1, y1, z1, x2, y2, z2)))
 
-    print(hits)
+    # print(hits)
 
     neighbour_list = []
 
@@ -216,17 +216,16 @@ def compute_sun_path(point):
     sun_path = pv.PolyData(vsol_ned)
     return sun_path
 
-def process_building(bdg, rtree, buildings):
-    geom = bdg.geometry[2]
-    print(bdg.id)
+def process_building(bdg, roof_mesh, neighbours):
+    geom = get_lod(bdg, "2.2")
 
     # Extract all surfaces from the geometry.
     surfaces = geom.get_surfaces()[0]
     mesh = makePolyData_all_surfaces(surfaces)
 
     # Extract only roof surfaces from the geometry.
-    roofs = geom.get_surfaces(type='roofsurface')
-    roof_mesh = makePolyData_semantic_surface(roofs, geom)
+    # roofs = geom.get_surfaces(type='roofsurface')
+    # roof_mesh = makePolyData_semantic_surface(roofs, geom)
 
     # Compute the normals of the roof surface triangles.
     roof_mesh = roof_mesh.compute_normals()
@@ -242,10 +241,6 @@ def process_building(bdg, rtree, buildings):
     # Sample the triangles into a grid of points. 
     # The lower the density value, the less space will be between the points, increasing the sampling density.
     grid_points = create_surface_grid(roof_mesh, density)
-
-    # Find the neighbours of the current mesh according to a certain offset value.
-    neighbours = find_neighbours(roof_mesh, rtree, buildings, 150)
-    print(neighbours)
 
     solar_roof_grid = []
     # sun_paths_mesh = []
@@ -316,9 +311,9 @@ def process_building(bdg, rtree, buildings):
 
     # print(vtkstrings[0])
     # return (mesh, solar_roof_grid, sun_paths_mesh, ray_lists_mesh, intersection_list_mesh, neighbours)
-    # return (mesh, solar_roof_grid, intersection_list_mesh, neighbours)
+    return (mesh, solar_roof_grid, intersection_list_mesh)
     # return (mesh, solar_roof_grid, neighbours)
-    return (mesh, solar_roof_grid)
+    # return (mesh, solar_roof_grid)
 
 def test_one_building(buildings, rtree, start_time):
     # Take out one building.
@@ -380,50 +375,48 @@ def functionWithPickableInput(inputstring0):
 def test_multiple_buildings(buildings, rtree, start_time):
     bdg_list = list(buildings.keys())[:2]
 
-    # id = "NL.IMBAG.Pand.0503100000031377-0"
-    # id2 = "NL.IMBAG.Pand.0503100000031378-0"
-    # id3 = "NL.IMBAG.Pand.0503100000031379-0"
-    # id4 = "NL.IMBAG.Pand.0503100000031380-0"
-    # id5 = "NL.IMBAG.Pand.0503100000031381-0"
-    # id6 = "NL.IMBAG.Pand.0503100000031382-0"
-
-    # bdg_list = [id, id2, id3, id4, id5, id6]
-
-    # Process all buildings in a list of buildings by using list comprehension with multiprocessing.
-    # Start parallelisation:
-    # pool = mp.Pool(mp.cpu_count()-2)
-    # result = pool.map(process_building, [(count, buildings[fid], tr_obj) for count, fid in enumerate(bdg_list, 1)])
-    # pool.close()
-
     from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
     from tqdm import tqdm
 
     futures = []
 
-    with ThreadPoolExecutor(max_workers= mp.cpu_count()-2) as pool:
+    with ProcessPoolExecutor(max_workers= mp.cpu_count()-2) as pool:
         print(mp.cpu_count())
         # The library tqdm is used to display a progress bar in the terminal.
         with tqdm(total=len(bdg_list)) as progress:
             # futures = []
 
             for id in bdg_list:
-                future = pool.submit(process_building, buildings[id], rtree, buildings)
+                print(id)
+                geom = get_lod(buildings[id], "2.2")
+
+                # TODO: look into getting access to verts right away.
+
+                # Extract only roof surfaces from the geometry.
+                roofs = geom.get_surfaces(type='roofsurface')
+                roof_mesh = makePolyData_semantic_surface(roofs, geom)
+
+                # Find the neighbours of the current mesh according to a certain offset value.
+                neighbours = find_neighbours(roof_mesh, rtree, buildings, 150)
+                # print(neighbours)
+                
+                future = pool.submit(process_building, buildings[id], roof_mesh, neighbours)
                 future.add_done_callback(lambda p: progress.update())
                 
                 # roof, wall, floor, grid = future.result()
                 # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
-                # mesh, grid, intersections, neighbours = future.result() # CHECK WHAT ERROR HAPPENS HERE! --> pickling intersections gives the error.
+                mesh, grid, intersections = future.result() # CHECK WHAT ERROR HAPPENS HERE! --> pickling intersections gives the error.
                 
-                mesh, grid = future.result()
+                # mesh, grid = future.result()
                 # mesh, grid, neighbours = future.result()        # Pickling mesh, grid and neighbours is possible.
                                                                 # BUT neighbours list is empty when using ProcessPoolExecutor, so should fix this.
                                                                 # DEBUG for test_one_building function and this function when finding the neigbhours.
                 # futures.append(future)
 
                 # mesh, grid = future.result()
-                # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersections), neighbours))
+                mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersections), neighbours))
                 # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), neighbours))
-                mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid))) # Don't export neighbours to make it more efficient.
+                # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid))) # Don't export neighbours to make it more efficient.
                                                                         # Might choose to create polydata of whole buildings list at once.
                 # mesh, grid, sun_path = future.result()
                 # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(sun_path)))
@@ -440,6 +433,9 @@ def test_multiple_buildings(buildings, rtree, start_time):
     #     # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), neighbours))
     #     mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid)))
     #     results.append(mesh_block)
+
+    # buildings_mesh = makePolyData_all_surfaces(.get_surfaces()[0])
+    # print(buildings_mesh)
 
     block = pv.MultiBlock(futures)
     # block = pv.MultiBlock(results)
