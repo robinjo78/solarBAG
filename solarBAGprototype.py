@@ -373,7 +373,7 @@ def functionWithPickableInput(inputstring0):
 
 # Now, it is approximately 4x faster with multiprocessing because I do not transform the whole dataset to real coordinates anymore within the loop.
 def test_multiple_buildings(buildings, rtree, start_time):
-    bdg_list = list(buildings.keys())[:2]
+    bdg_list = list(buildings.keys())[:12]
 
     from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
     from tqdm import tqdm
@@ -402,7 +402,11 @@ def test_multiple_buildings(buildings, rtree, start_time):
                 
                 future = pool.submit(process_building, buildings[id], roof_mesh, neighbours)
                 future.add_done_callback(lambda p: progress.update())
-                
+
+                futures.append(future)
+
+            results = []
+            for future in futures:
                 # roof, wall, floor, grid = future.result()
                 # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
                 mesh, grid, intersections = future.result() # CHECK WHAT ERROR HAPPENS HERE! --> pickling intersections gives the error.
@@ -414,14 +418,14 @@ def test_multiple_buildings(buildings, rtree, start_time):
                 # futures.append(future)
 
                 # mesh, grid = future.result()
-                mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersections), neighbours))
+                mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersections)))
                 # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), neighbours))
                 # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid))) # Don't export neighbours to make it more efficient.
                                                                         # Might choose to create polydata of whole buildings list at once.
                 # mesh, grid, sun_path = future.result()
                 # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(sun_path)))
                 
-                futures.append(mesh_block)
+                results.append(mesh_block)
 
     # print(futures)
 
@@ -437,7 +441,7 @@ def test_multiple_buildings(buildings, rtree, start_time):
     # buildings_mesh = makePolyData_all_surfaces(.get_surfaces()[0])
     # print(buildings_mesh)
 
-    block = pv.MultiBlock(futures)
+    block = pv.MultiBlock(results)
     # block = pv.MultiBlock(results)
     block.save("vtm_objects/citymodel_sol_grid_3dbag_update_test_2.vtm")
 
@@ -452,7 +456,7 @@ def main():
 
     # Load the CityJSON file from a path.
     # path = "/mnt/c/Users/hurkm/repos/solarBAG/data/3dbag_v21031_7425c21b_3007_v11.city.json" # a linux path
-    path = "/mnt/c/Users/hurkm/repos/solarBAG/data/3dbag_v210908_fd2cee53_3007_new_v11_triangulated.city.json" # a linux path
+    path = "data/3dbag_v210908_fd2cee53_3007_new_v11_triangulated.city.json" # a linux path
 
     cm = cityjson.load(path)
 
