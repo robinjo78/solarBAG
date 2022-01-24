@@ -165,7 +165,6 @@ def makePolyData_all_surfaces(input_surfaces):
 # Find the neighbours corresponding to a building with a certain offset in meters
 def find_neighbours(roof_mesh, rtree, buildings, offset):
     roof_mesh_center = roof_mesh.center_of_mass()
-    print(roof_mesh_center)
 
     # Applied the pre-specified offset to each coordinate in both pos and neg directions to get two opposite corners of a bounding box.
     x1 = roof_mesh_center[0] - offset
@@ -197,8 +196,9 @@ def find_neighbours(roof_mesh, rtree, buildings, offset):
         neighbour_list.append(neighbour_mesh)
     
     if any(hits):
-        neighbours = neighbour_list[0].merge(neighbour_list[1:])
-        return neighbours
+        # neighbours = neighbour_list[0].merge(neighbour_list[1:])
+        # return neighbours
+        return neighbour_list
     else:
         # Should be building itself? OR should not happen at all??
         neighbours = roof_mesh
@@ -274,11 +274,17 @@ def process_building(bdg, roof_mesh, neighbours):
                 # ray = pv.Line(sun_point, point)
         #         # ray_list.append(ray)
 
-        #         # Find a possible intersection point between the current position of the sun and the current point of a triangle.
-                intersection_point, _ = neighbours.ray_trace(sun_point, point, first_point=True) # The ray_trace function CAUSES the pickling error.
-                # intersection_point = np.array(sun_point)
-                if any(intersection_point):
-                    intersection_point_list.append(intersection_point)
+                # Find a possible intersection point between the current position of the sun and the current point of a triangle.
+                for neighbour in neighbours:
+                    intersection_point, _ = neighbour.ray_trace(sun_point, point, first_point=True)
+                    if any(intersection_point):
+                        intersection_point_list.append(intersection_point)
+                        break
+
+                # intersection_point, _ = neighbours.ray_trace(sun_point, point, first_point=True) # The ray_trace function CAUSES the pickling error.
+                # # intersection_point = np.array(sun_point)
+                # if any(intersection_point):
+                #     intersection_point_list.append(intersection_point)
 
             point = pv.PolyData(point)
             point.add_field_data(len(intersection_point_list), "intersection count")
@@ -361,17 +367,6 @@ def test_one_building(buildings, rtree, start_time):
     # Print the time the script took.
     print("Time to run this script to the end: {} seconds".format(time.time() - start_time))
 
-
-def functionWithPickableInput(inputstring0):
-    r0 = vtk.vtkPolyDataReader()
-    r0.ReadFromInputStringOn()
-    r0.SetInputString(inputstring0 )
-    r0.Update()
-    polydata0 = r0.GetOutput()
-    return polydata0
-    #compute the strings to use as input (they are the content of the correspondent vtk file)
-
-# Now, it is approximately 4x faster with multiprocessing because I do not transform the whole dataset to real coordinates anymore within the loop.
 def test_multiple_buildings(buildings, rtree, start_time):
     bdg_list = list(buildings.keys())[:12]
 
@@ -387,7 +382,6 @@ def test_multiple_buildings(buildings, rtree, start_time):
             # futures = []
 
             for id in bdg_list:
-                print(id)
                 geom = get_lod(buildings[id], "2.2")
 
                 # TODO: look into getting access to verts right away.
@@ -398,7 +392,6 @@ def test_multiple_buildings(buildings, rtree, start_time):
 
                 # Find the neighbours of the current mesh according to a certain offset value.
                 neighbours = find_neighbours(roof_mesh, rtree, buildings, 150)
-                # print(neighbours)
                 
                 future = pool.submit(process_building, buildings[id], roof_mesh, neighbours)
                 future.add_done_callback(lambda p: progress.update())
@@ -407,25 +400,15 @@ def test_multiple_buildings(buildings, rtree, start_time):
 
             results = []
             for future in futures:
-                # roof, wall, floor, grid = future.result()
-                # mesh_block = pv.MultiBlock((roof, floor, wall, grid))
-                mesh, grid, intersections = future.result() # CHECK WHAT ERROR HAPPENS HERE! --> pickling intersections gives the error.
-                
-                # mesh, grid = future.result()
                 # mesh, grid, neighbours = future.result()        # Pickling mesh, grid and neighbours is possible.
                                                                 # BUT neighbours list is empty when using ProcessPoolExecutor, so should fix this.
                                                                 # DEBUG for test_one_building function and this function when finding the neigbhours.
-                # futures.append(future)
-
-                # mesh, grid = future.result()
-                mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersections)))
-                # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), neighbours))
-                # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid))) # Don't export neighbours to make it more efficient.
-                                                                        # Might choose to create polydata of whole buildings list at once.
-                # mesh, grid, sun_path = future.result()
-                # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(sun_path)))
                 
-                results.append(mesh_block)
+                # mesh, grid, intersections = future.result() # CHECK WHAT ERROR HAPPENS HERE! --> pickling intersections gives the error.
+                # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersections)))
+                # results.append(mesh_block)
+                results.append(future.result())
+
 
     # print(futures)
 
@@ -441,9 +424,30 @@ def test_multiple_buildings(buildings, rtree, start_time):
     # buildings_mesh = makePolyData_all_surfaces(.get_surfaces()[0])
     # print(buildings_mesh)
 
-    block = pv.MultiBlock(results)
+    multiblocks = []
+    grid_points = []
+    intersection_points = []
+    for result in results:
+        mesh, grid, intersections = result
+        # print(type(grid), grid)
+        # print(type(intersections), intersections)
+        # mesh_block = pv.MultiBlock((mesh, pv.MultiBlock(grid), pv.MultiBlock(intersections)))
+        # multiblocks.append(mesh_block)
+        # mesh, _, _ = result
+        multiblocks.append(mesh)
+        # grid_points.extend(grid)
+        # intersection_points.extend(intersections)
+
+    block = pv.MultiBlock(multiblocks)
+    # grids = pv.MultiBlock(grid_points)
+    # intersections_block = pv.MultiBlock(intersection_points)
+
+    block.save("vtm_objects/new/mesh_block.vtm")
+    # grids.save("vtm_objects/new/grid_points.vtm")
+    # intersections_block.save("vtm_objects/new/intersections.vtm")
+
     # block = pv.MultiBlock(results)
-    block.save("vtm_objects/citymodel_sol_grid_3dbag_update_test_2.vtm")
+    # block.save("vtm_objects/citymodel_sol_grid_3dbag_update_test_2.vtm")
 
     # result = [process_building(count, buildings[fid], tr_obj) for count, fid in enumerate(bdg_list, 1)]
     
