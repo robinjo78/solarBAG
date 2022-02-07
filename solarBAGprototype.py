@@ -7,6 +7,7 @@ import multiprocessing as mp
 import datetime as dt
 import time
 import sys
+import math
 
 from multiprocessing.spawn import freeze_support
 from helpers.shape_index import create_surface_grid
@@ -163,7 +164,31 @@ def makePolyData_surfaces(input_surfaces):
 
     return mesh
 
-def find_neighbours(roof_mesh, rtree, buildings, lod, offset):
+def compute_azimuth(pt1, pt2):
+    """
+    Computes the azimuth between two points.
+    Returns a value in degrees within range [-180,180]
+    """
+    return (180/math.pi) * math.atan2(pt2[0] - pt1[0], pt2[1] - pt1[1])
+
+def skip_on_azimuth(roof, neighbour):
+    # roof_bounds = roof.bounds
+    # neighbour_bounds = neighbour.bounds
+
+    roof_center = roof.center_of_mass()
+    neighbour_center = neighbour.center_of_mass()
+
+    north_range = [-48, 48]
+
+    azimuth = compute_azimuth(roof_center, neighbour_center)
+
+    if azimuth > north_range[0] and azimuth < north_range[1]:
+        return True
+    else:
+        return False
+
+
+def find_neighbours(id, roof_mesh, rtree, buildings, lod, offset):
     """
     Find the neighbours corresponding to a building with a certain offset in meters.
     """
@@ -182,7 +207,7 @@ def find_neighbours(roof_mesh, rtree, buildings, lod, offset):
     neighbour_list = []
 
     for item in hits:
-        # Get the id of the current item and look this up in de buildings dict of cityjson
+        # Get the id of the current item and look this up in de buildings dict of cityjson.
         # Then make a polydata mesh out of it and it it to the list of meshes: the neigbhours.
         # Then the neighbours can be ray traced.
         neighbour_building = buildings[item.object]
@@ -191,14 +216,21 @@ def find_neighbours(roof_mesh, rtree, buildings, lod, offset):
         neighbour_surfaces = neighbour_geom.get_surfaces()[0]
         neighbour_mesh = makePolyData_surfaces(neighbour_surfaces)
 
+        if id == item.object:
+            neighbour_list.append(neighbour_mesh)
+            continue
+
+        # Skip neighbouring buildings if their z_max is lower than the z_min of the current roof. These neighbours cannot block the current building.
+        if roof_mesh.bounds[4] > neighbour_mesh.bounds[5]:
+            # print("ID: {}, zmin: {}, zmax: {}".format(item.object, roof_mesh.bounds[4], neighbour_mesh.bounds[5]))
+            continue
+
+        if skip_on_azimuth(roof_mesh,neighbour_mesh):
+            continue
+
         neighbour_list.append(neighbour_mesh)
-    
-    if any(hits):
-        return neighbour_list
-    else:
-        # Should be building itself? OR should not happen at all??
-        neighbours = roof_mesh
-        return neighbours
+
+    return neighbour_list
 
 def compute_sun_path(point):
     """
@@ -235,9 +267,11 @@ def process_building(geom, roof_mesh, neighbours, density):
     # The lower the density value, the less space will be between the points, increasing the sampling density.
     grid_points = create_surface_grid(roof_mesh, density)
 
+    # TODO use compute sun_path here to compute the sun_path for a day based on the center position of a roof mesh.
+    # This should give a speed-up as the sun path is only computed once for each mesh instead of for each sampled point.
+    # Important is to take the position of the sun quite far, otherwise values get incorrect.
+
     solar_roof_grid = []
-    # sun_paths_mesh = []
-    # ray_lists_mesh = []
     intersection_list_mesh = []
     # Process each gridded triangle of the roof of the current building
     for tuple in grid_points:
@@ -248,25 +282,18 @@ def process_building(geom, roof_mesh, neighbours, density):
         sol_val = sol_irr[index]
 
         gridded_triangle = []
-        # sun_paths_triangle = []
-        # ray_lists_triangle = []
         intersection_list_triangle = []
         # Process each point in the current triangle:
         # - create a sun path
         # - perform ray tracing to find a possible intersection between the current point and a point from the sun path
         for point in points:
             sun_path = compute_sun_path(point)
-            # sun_paths_triangle.append(sun_path)
 
             # NOTE: ray tracing with its own building always gives back an intersection point? --> NO
             # It did this sometimes as the sampled points did sometimes lie below the triangular surface, meaning an intersection was always found.
             
-            # ray_list = []
             intersection_point_list = []
             for sun_point in sun_path.points:
-                # ray = pv.Line(sun_point, point)
-                # ray_list.append(ray)
-
                 # Find a possible intersection point between the current position of the sun and the current point of a triangle.
                 for neighbour in neighbours:
                     intersection_point, _ = neighbour.ray_trace(sun_point, point, first_point=True)
@@ -281,14 +308,9 @@ def process_building(geom, roof_mesh, neighbours, density):
             point.add_field_data(sol_val, "solar irradiation")
             
             gridded_triangle.append(point)
-
-            # ray_list = pv.MultiBlock(ray_list)    
-            # ray_lists_triangle.append(ray_list)
             intersection_list_triangle.append(pv.PolyData(intersection_point_list))
 
         solar_roof_grid.extend(gridded_triangle)
-        # sun_paths_mesh.extend(sun_paths_triangle)  
-        # ray_lists_mesh.extend(ray_lists_triangle)  
         intersection_list_mesh.extend(intersection_list_triangle)
 
     return (mesh, solar_roof_grid, intersection_list_mesh)
@@ -307,39 +329,50 @@ def vtm_writer_cm(buildings, lod, path):
     mesh_block = pv.MultiBlock(mesh_list)
     mesh_block.save("vtm_objects/{}/meshed_citymodel.vtm".format(path))
 
-def vtm_writer(results, path, write_mesh=False):
+def vtm_writer(results, path, write_mesh=False, write_grid=False, write_intersections=False, write_neighbours=False):
     """
     Write the resulting Pyvista objects to several vtm files.
     """
     multiblocks = []
     grid_points = []
     intersection_points = []
+    neighbours = []
     for result in results:
-        mesh, grid, intersections = result
-       
+        # mesh, grid, intersections = result
+        mesh, grid, intersections = result[0]
+        
         multiblocks.append(mesh)
-        # grid_points.extend(grid)
-        # intersection_points.extend(intersections)
+        grid_points.extend(grid)
+        intersection_points.extend(intersections)
+        neighbours.extend(result[1])
 
     if write_mesh:
         block = pv.MultiBlock(multiblocks)
-        block.save("vtm_objects/{}/meshed_citymodel.vtm".format(path))
-    # grids = pv.MultiBlock(grid_points)
-    # intersections_block = pv.MultiBlock(intersection_points)
+        # block.save("vtm_objects/{}/meshed_citymodel.vtm".format(path))
+        block.save("vtm_objects/{}/testing/meshed_citymodel_single_distance_filter.vtm".format(path))
+    
+    if write_grid:
+        grids = pv.MultiBlock(grid_points)
+        grids.save("vtm_objects/{}/grid_points.vtm".format(path))
 
-    # grids.save("vtm_objects/new/grid_points.vtm")
-    # intersections_block.save("vtm_objects/new/intersections.vtm")
+    if write_intersections:
+        intersections_block = pv.MultiBlock(intersection_points)
+        intersections_block.save("vtm_objects/{}/intersections.vtm".format(path))
 
-def process_multiple_buildings(buildings, rtree, lod, offset, density, start_time, path):
+    if write_neighbours:
+        neighbours_block = pv.MultiBlock(neighbours)
+        neighbours_block.save("vtm_objects/{}/testing/neighbours_single_distance_filter.vtm".format(path))
+
+def process_multiple_buildings(buildings, rtree, cores, lod, offset, density):
     """
     Start the whole computation pipeline for multiple buildings within multiple processes.
     """
-    with ProcessPoolExecutor(max_workers= mp.cpu_count()-2) as pool:
+    with ProcessPoolExecutor(max_workers=cores) as pool:
         # The library tqdm is used to display a progress bar in the terminal.
         with tqdm(total=len(buildings)) as progress:
             futures = []
 
-            for id in list(buildings.keys()):
+            for id in list(buildings.keys())[:2]:
                 geom = get_lod(buildings[id], lod)
 
                 # TODO: look into getting access to verts right away.
@@ -348,23 +381,22 @@ def process_multiple_buildings(buildings, rtree, lod, offset, density, start_tim
                 roof_mesh = makePolyData_surfaces(get_semantic_surfaces(geom, 'roofsurface'))
 
                 # Find the neighbours of the current mesh according to a certain offset value.
-                neighbours = find_neighbours(roof_mesh, rtree, buildings, lod, offset)
+                neighbours = find_neighbours(id, roof_mesh, rtree, buildings, lod, offset)
+                # print(id, len(neighbours))
                 
                 future = pool.submit(process_building, geom, roof_mesh, neighbours, density)
                 future.add_done_callback(lambda p: progress.update())
 
-                futures.append(future)
+                # futures.append(future)
+                futures.append([future, neighbours])
 
             results = []
 
             for future in futures:
-                results.append(future.result())
+                # results.append(future.result())
+                results.append([future[0].result(), future[1]])
 
-    print("Time to run the computations: {} seconds".format(time.time() - start_time))
-
-    vtm_writer(results, path)
-    
-    print("Total time to run this script with writing to file(s): {} seconds".format(time.time() - start_time))
+    return results
 
 # THE MAIN WORKFLOW BELOW:
 def main():
@@ -378,6 +410,7 @@ def main():
     path = sys.argv[1]
     cm = cityjson.load(path)
 
+    # Adjust the path string for convenient and organised file writing purposes.
     split_list = path.split("/")
     path_string = split_list[len(split_list)-1]
 
@@ -387,6 +420,7 @@ def main():
     # id = "NL.IMBAG.Pand.0503100000005509-0"
 
     # Program settings:
+    cores = mp.cpu_count()-2
     lod = "2.2"
     neighbour_offset = 150
     sampling_density = 3
@@ -395,7 +429,13 @@ def main():
     rtree_idx = create_rtree(buildings, lod)
 
     # Process all buildings in the buildings dictionary.
-    process_multiple_buildings(buildings, rtree_idx, lod, neighbour_offset, sampling_density, start_time, path_string)
+    results = process_multiple_buildings(buildings, rtree_idx, cores, lod, neighbour_offset, sampling_density)
+
+    print("Time to run the computations: {} seconds".format(time.time() - start_time))
+
+    vtm_writer(results, path_string, write_mesh=True, write_neighbours=True)
+    
+    print("Total time to run this script with writing to file(s): {} seconds".format(time.time() - start_time))
 
 if __name__ == "__main__":
     freeze_support()
