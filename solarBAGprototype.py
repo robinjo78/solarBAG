@@ -3,6 +3,7 @@ import pyvista as pv
 import solarpy as sp
 from cjio import cityjson
 from rtree import index
+from pyproj import CRS, Proj
 import multiprocessing as mp
 import datetime as dt
 import time
@@ -97,22 +98,36 @@ def compute_graph_area(G):
         res += g
 
     # Divide by four because the intervals are 15 minutes and the computed values are W/h, so we need W/15min and add these 4 up to get W/h.
-    res = res/4
+    # res = res/4
 
     return res
 
-def irradiance_on_triangles(vnorms):
+def irradiance_on_triangles(vnorms, roof_center, proj, skip_timestamp_indices=[]):
     """
     Computes the solar irradiance value for a triangle.
     """
-    date = dt.datetime(2019, 7, 5)
-    lat = 52  # Delft
-    h = 0
+    date = dt.datetime(2019, 7, 5) # TODO make this variable (within a loop)
+    h = 0 # TODO make this variable.
+
+    latlon = proj(roof_center[0], roof_center[1], inverse=True)
+    lat = latlon[1]
+
+    # lat = 52  # Delft
+
+    # TODO: incorporate the skip_timestamp_indices list in the computation below.
+
+    # print(skip_timestamp_indices)
 
     res_list = []
     for vnorm in vnorms:
-        t = [date + dt.timedelta(minutes=i) for i in range(0, 15 * 24 * 4, 15)]
+        # t = [date + dt.timedelta(minutes=i) for i in range(0, 15 * 24 * 4, 15)]
+        t = [date + dt.timedelta(minutes=i) for i in range(0, 60 * 24, 60)]
         G = [sp.irradiance_on_plane(vnorm, h, i, lat) for i in t]
+        if len(skip_timestamp_indices) > 0:
+            # print(G, compute_graph_area(G))
+            for index in skip_timestamp_indices:
+                G[index] = 0
+            # print(G, compute_graph_area(G))
 
         res = compute_graph_area(G)
         res_list.append(res)
@@ -171,11 +186,10 @@ def compute_azimuth(pt1, pt2):
     """
     return (180/math.pi) * math.atan2(pt2[0] - pt1[0], pt2[1] - pt1[1])
 
-def skip_on_azimuth(roof, neighbour):
+def skip_on_azimuth(roof_center, neighbour):
     # roof_bounds = roof.bounds
     # neighbour_bounds = neighbour.bounds
 
-    roof_center = roof.center_of_mass()
     neighbour_center = neighbour.center_of_mass()
 
     north_range = [-48, 48]
@@ -225,7 +239,7 @@ def find_neighbours(id, roof_mesh, rtree, buildings, lod, offset):
             # print("ID: {}, zmin: {}, zmax: {}".format(item.object, roof_mesh.bounds[4], neighbour_mesh.bounds[5]))
             continue
 
-        if skip_on_azimuth(roof_mesh,neighbour_mesh):
+        if skip_on_azimuth(roof_mesh_center, neighbour_mesh):
             continue
 
         neighbour_list.append(neighbour_mesh)
@@ -248,7 +262,7 @@ def compute_sun_path(point):
     sun_path = pv.PolyData(vsol_ned)
     return sun_path
 
-def process_building(geom, roof_mesh, neighbours, density):
+def process_building(geom, roof_mesh, neighbours, proj, density):
     """
     Process a building to enrich it with a solar irradiation value.
     """
@@ -257,11 +271,14 @@ def process_building(geom, roof_mesh, neighbours, density):
     mesh = makePolyData_surfaces(surfaces)
 
     # Compute the normals of the roof surface triangles.
-    roof_mesh = roof_mesh.compute_normals()
+    roof_mesh = roof_mesh.compute_normals() # Check whether only triangles are used to compute normals, not points or such.
     vnorms = roof_mesh['Normals']
+    # print("n_cells: ", roof_mesh.n_cells)
+    # print("vnorms: ", len(vnorms))
 
     # Compute solar irradiation per triangle.
-    sol_irr = irradiance_on_triangles(vnorms)
+    sol_irr = irradiance_on_triangles(vnorms, roof_mesh.center_of_mass(), proj)
+    # print(len(sol_irr))
 
     # Sample the triangles into a grid of points. 
     # The lower the density value, the less space will be between the points, increasing the sampling density.
@@ -280,6 +297,7 @@ def process_building(geom, roof_mesh, neighbours, density):
 
         # Get the solar value belonging to the current triangle.
         sol_val = sol_irr[index]
+        vnorm = vnorms[index]
 
         gridded_triangle = []
         intersection_list_triangle = []
@@ -288,19 +306,26 @@ def process_building(geom, roof_mesh, neighbours, density):
         # - perform ray tracing to find a possible intersection between the current point and a point from the sun path
         for point in points:
             sun_path = compute_sun_path(point)
+            # print(len(sun_path.points))
 
             # NOTE: ray tracing with its own building always gives back an intersection point? --> NO
             # It did this sometimes as the sampled points did sometimes lie below the triangular surface, meaning an intersection was always found.
             
             intersection_point_list = []
-            for sun_point in sun_path.points:
+            intersection_index_list = []
+            for i, sun_point in enumerate(sun_path.points):
                 # Find a possible intersection point between the current position of the sun and the current point of a triangle.
                 for neighbour in neighbours:
                     intersection_point, _ = neighbour.ray_trace(sun_point, point, first_point=True)
                     if any(intersection_point):
+                        intersection_index_list.append(i)
                         intersection_point_list.append(intersection_point)
                         break
-
+            
+            # print(len(intersection_index_list), intersection_index_list)
+            if len(intersection_index_list) > 0:
+                sol_val = irradiance_on_triangles([vnorm], roof_mesh.center_of_mass(), proj, skip_timestamp_indices=intersection_index_list)[0]
+            
             point = pv.PolyData(point)
             point.add_field_data(len(intersection_point_list), "intersection count")
 
@@ -338,22 +363,25 @@ def vtm_writer(results, path, write_mesh=False, write_grid=False, write_intersec
     intersection_points = []
     neighbours = []
     for result in results:
-        # mesh, grid, intersections = result
-        mesh, grid, intersections = result[0]
+        mesh, grid, intersections = result
+        # mesh, grid, intersections = result[0]
         
         multiblocks.append(mesh)
         grid_points.extend(grid)
         intersection_points.extend(intersections)
-        neighbours.extend(result[1])
+        # neighbours.extend(result[1])
 
     if write_mesh:
         block = pv.MultiBlock(multiblocks)
         # block.save("vtm_objects/{}/meshed_citymodel.vtm".format(path))
-        block.save("vtm_objects/{}/testing/meshed_citymodel_single_distance_filter.vtm".format(path))
+        block.save("vtm_objects/{}/solar_testing/meshes.vtm".format(path))
     
     if write_grid:
         grids = pv.MultiBlock(grid_points)
-        grids.save("vtm_objects/{}/grid_points.vtm".format(path))
+        # grids = grid_points[3]
+        # grids.save("vtm_objects/{}/grid_points.vtm".format(path))
+        # grids.save("vtm_objects/{}/solar_testing/grid_points_2.vtm".format(path))
+        grids.save("vtm_objects/{}/solar_testing/grid_points_3_incorporate_intersections.vtm".format(path))
 
     if write_intersections:
         intersections_block = pv.MultiBlock(intersection_points)
@@ -363,7 +391,7 @@ def vtm_writer(results, path, write_mesh=False, write_grid=False, write_intersec
         neighbours_block = pv.MultiBlock(neighbours)
         neighbours_block.save("vtm_objects/{}/testing/neighbours_single_distance_filter.vtm".format(path))
 
-def process_multiple_buildings(buildings, rtree, cores, lod, offset, density):
+def process_multiple_buildings(buildings, rtree, cores, proj, lod, offset, density):
     """
     Start the whole computation pipeline for multiple buildings within multiple processes.
     """
@@ -384,17 +412,17 @@ def process_multiple_buildings(buildings, rtree, cores, lod, offset, density):
                 neighbours = find_neighbours(id, roof_mesh, rtree, buildings, lod, offset)
                 # print(id, len(neighbours))
                 
-                future = pool.submit(process_building, geom, roof_mesh, neighbours, density)
+                future = pool.submit(process_building, geom, roof_mesh, neighbours, proj, density)
                 future.add_done_callback(lambda p: progress.update())
 
-                # futures.append(future)
-                futures.append([future, neighbours])
+                futures.append(future)
+                # futures.append([future, neighbours])
 
             results = []
 
             for future in futures:
-                # results.append(future.result())
-                results.append([future[0].result(), future[1]])
+                results.append(future.result())
+                # results.append([future[0].result(), future[1]])
 
     return results
 
@@ -417,6 +445,10 @@ def main():
     # Get the buildings from the city model as dict (there are only buildings).
     buildings = cm.get_cityobjects(type='BuildingPart')
 
+    # Extract epsg from the input file and get the projection object.
+    epsg = cm.get_epsg()
+    proj = Proj(epsg)
+
     # id = "NL.IMBAG.Pand.0503100000005509-0"
 
     # Program settings:
@@ -429,11 +461,11 @@ def main():
     rtree_idx = create_rtree(buildings, lod)
 
     # Process all buildings in the buildings dictionary.
-    results = process_multiple_buildings(buildings, rtree_idx, cores, lod, neighbour_offset, sampling_density)
+    results = process_multiple_buildings(buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density)
 
     print("Time to run the computations: {} seconds".format(time.time() - start_time))
 
-    vtm_writer(results, path_string, write_mesh=True, write_neighbours=True)
+    vtm_writer(results, path_string, write_grid=False)
     
     print("Total time to run this script with writing to file(s): {} seconds".format(time.time() - start_time))
 
