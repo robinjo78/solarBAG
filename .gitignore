@@ -13,3 +13,4 @@ multiprocessing_test.py
 pyrr_test.py
 shapely_test.py
 azimuth.py
+cmd_tips.txt
