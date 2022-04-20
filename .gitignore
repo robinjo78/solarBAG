@@ -13,4 +13,8 @@ multiprocessing_test.py
 pyrr_test.py
 shapely_test.py
 azimuth.py
+solarpoint.py
+solarpy_test.py
+test_2.py
+
 cmd_tips.txt
