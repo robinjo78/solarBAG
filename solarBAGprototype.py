@@ -516,49 +516,49 @@ def process_multiple_buildings(buildings, rtree, cores, proj, lod, offset, densi
         with tqdm(total=len(buildings)) as progress:
             futures = []
 
-            # for id in list(buildings.keys()): # Taking a subset of this list is not correct as not all neighbours can be considered.
-            #     geom = get_lod(buildings[id], lod)
-            #     # print(id)
+            for id in list(buildings.keys()): # Taking a subset of this list is not correct as not all neighbours can be considered.
+                geom = get_lod(buildings[id], lod)
+                # print(id)
 
-            #     # TODO: look into getting access to verts right away.
+                # TODO: look into getting access to verts right away.
 
-            #     # Extract only roof surfaces from the building geometry.
-            #     roof_mesh = makePolyData_surfaces(get_semantic_surfaces(geom, 'roofsurface'))
+                # Extract only roof surfaces from the building geometry.
+                roof_mesh = makePolyData_surfaces(get_semantic_surfaces(geom, 'roofsurface'))
 
-            #     # Find the neighbours of the current mesh according to a certain offset value.
-            #     neighbours = find_neighbours(id, roof_mesh, rtree, buildings, lod, offset)
-            #     # print(id, len(neighbours))
+                # Find the neighbours of the current mesh according to a certain offset value.
+                neighbours = find_neighbours(id, roof_mesh, rtree, buildings, lod, offset)
+                # print(id, len(neighbours))
                 
-            #     future = pool.submit(process_building, geom, roof_mesh, neighbours, proj, density, datelist)
-            #     future.add_done_callback(lambda p: progress.update())
+                future = pool.submit(process_building, geom, roof_mesh, neighbours, proj, density, datelist)
+                future.add_done_callback(lambda p: progress.update())
 
-            #     futures.append(future)
-            #     # futures.append([future, neighbours])
+                futures.append(future)
+                # futures.append([future, neighbours])
 
-            b_id = "NL.IMBAG.Pand.0503100000008153-0"
-            # b_id = "NL.IMBAG.Pand.0503100000009010-0"
-            geom = get_lod(buildings[b_id], lod)
-            # print(id)
+            # b_id = "NL.IMBAG.Pand.0503100000008153-0"
+            # # b_id = "NL.IMBAG.Pand.0503100000009010-0"
+            # geom = get_lod(buildings[b_id], lod)
+            # # print(id)
 
-            building = buildings[b_id]
+            # building = buildings[b_id]
             
-            print(type(building))
-            print(building)
-            print(building.id)
+            # print(type(building))
+            # print(building)
+            # print(building.id)
 
-            # TODO: look into getting access to verts right away.
+            # # TODO: look into getting access to verts right away.
 
-            # Extract only roof surfaces from the building geometry.
-            roof_mesh = makePolyData_surfaces(get_semantic_surfaces(geom, 'roofsurface'))
+            # # Extract only roof surfaces from the building geometry.
+            # roof_mesh = makePolyData_surfaces(get_semantic_surfaces(geom, 'roofsurface'))
 
-            # Find the neighbours of the current mesh according to a certain offset value.
-            neighbours = find_neighbours(b_id, roof_mesh, rtree, buildings, lod, offset)
-            # print(id, len(neighbours))
+            # # Find the neighbours of the current mesh according to a certain offset value.
+            # neighbours = find_neighbours(b_id, roof_mesh, rtree, buildings, lod, offset)
+            # # print(id, len(neighbours))
             
-            future = pool.submit(process_building, geom, roof_mesh, neighbours, proj, density, datelist)
-            future.add_done_callback(lambda p: progress.update())
+            # future = pool.submit(process_building, geom, roof_mesh, neighbours, proj, density, datelist)
+            # future.add_done_callback(lambda p: progress.update())
 
-            futures.append(future)
+            # futures.append(future)
 
             results = []
 
