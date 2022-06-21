@@ -58,6 +58,9 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
 
                 grid = create_surface_grid(mesh, density)
                 gp_mesh = pv.PolyData([list(p) for points in grid for p in points[0]])
+                # TODO: For Robin
+                # gp_mesh.point_data["surface_idx"] = [] # <- Here you need to have for every point the index of the polygon that it belongs to
+                # gp_mesh.point_data["sol_val_list_day_in_month"] = []
                 
                 plot = pv.Plotter()
 
@@ -88,15 +91,19 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     # grid_points = create_surface_grid(pd_triangle, density)[0][0]     # The index it returns can be removed.
                     # print("Grid points:", grid_points)
 
+                    # TODO: For Robin
+                    grid_points = gp_mesh.extract_points([]); # <- Here you need code that based on the index of the triangle (j) only returns the points that belong to it
+
                     h_avg = np.average(grid_points, 0)[2]
                     if h_avg < 0:
                         h_avg = 0
                     # print("Average height:", h_avg)
 
+                    # TODO: For Robin - I would make pd_points_list a PolyData object with multiple points
                     pd_points_list = []
                     for point in grid_points:
                         point = pv.PolyData(point)
-                        point.add_field_data(vnorm, "vnorm_tr")
+                        point.point_data["vnorm_tr"] = vnorm
                         point.add_field_data([], "sol_val_list_day_in_month")
                         pd_points_list.append(point)
 
@@ -127,20 +134,17 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     # sol_vals_building.extend(sol_vals)
 
                     # Compute statistics for surface/triangle.
-                    sol_val_avg = np.mean(sol_vals)
-                    if len(grid_points) > 1:
-                        sol_val_min = min(sol_vals)[0]
-                        sol_val_max = max(sol_vals)[0]
-                        sol_val_std = np.std(sol_vals)
-                        # print("sol_val_min: ", sol_val_min)
-                        # print("sol_val_max: ", sol_val_max)
-                        # print("sol_val_std: ", sol_val_std)
-                        if len(grid_points) > 2:
-                            sol_val_p50 = np.percentile(sol_vals, 50)
-                            sol_val_p70 = np.percentile(sol_vals, 70)
-                            # print("sol_val_p50: ", sol_val_p50)
-                            # print("sol_val_p70: ", sol_val_p70)
-                    # print("Average sol val year:", sol_val_avg)
+                    stats = {
+                        'solar-number_of_samples': len(grid_points),
+                        'solar-potential_avg': np.mean(sol_vals),
+                        'solar-potential_min': np.min(sol_vals),
+                        'solar-potential_max': np.max(sol_vals),
+                        'solar-potential_std': np.std(sol_vals),
+                        'solar-potential_p50': np.percentile(sol_vals, 50),
+                        'solar-potential_p70': np.percentile(sol_vals, 70)
+                    }
+
+                    # print(stats)
 
                     # CREATION OF NEW SEMANTIC SURFACES:
                     surface_index = rsrf['surface_idx'][j]
@@ -152,16 +156,7 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     }
 
                     # CREATION OF NEW ATTRIBUTES FOR THE SEMANTIC SURFACES
-                    new_srf['attributes'] = {}
-                    new_srf['attributes']['solar-potential_avg'] = sol_val_avg
-                    if len(grid_points) > 1:
-                        new_srf['attributes']['solar-potential_min'] = sol_val_min
-                        new_srf['attributes']['solar-potential_max'] = sol_val_max
-                        new_srf['attributes']['solar-potential_std'] = sol_val_std
-                        if len(grid_points) > 2:
-                            new_srf['attributes']['solar-potential_p50'] = sol_val_p50
-                            new_srf['attributes']['solar-potential_p70'] = sol_val_p70
-                    new_srf['attributes']['solar-potential_unit'] = "Wh/m^2/year"
+                    new_srf['attributes'] = stats
 
                     # Copy the existing attributes of the surface if applicable.
                     if 'attributes' in rsrf.keys():
