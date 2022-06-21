@@ -54,36 +54,38 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     geom.surfaces[r_id]['attributes'] = rsrf['attributes']
                 
                 boundaries = geom.get_surface_boundaries(rsrf)
+                mesh = utils.makePolyData_surfaces(boundaries)
+
+                grid = create_surface_grid(mesh, density)
+                gp_mesh = pv.PolyData([list(p) for points in grid for p in points[0]])
+                
+                plot = pv.Plotter()
+
+                plot.add_mesh(mesh, show_edges="black")
+                plot.add_mesh(gp_mesh, color="blue")
+
+                plot.show()
                 # Potential TODO after P4: do the triangulation here instead of for the whole file at once. This keeps track of what triangles belong to what surfaces.
 
-                # Per surface (boundary_geometry) in boundaries (in this case triangle) I want:
-                # - normal vector -- Done
-                # - sampled grid points -- Done
-                # - to check whether it is sliver, if true skip and just return geom -- Half done
-                # - polydata object of it -- Done
-                for j, boundary_geometry in enumerate(boundaries):
+                for j in range(mesh.n_cells):
                     # boundary_geometry is a triangle (and should be a triangle)
                     # In case the triangle is a sliver, it should be ignored in further processing, but stored as is in the geom.
-                    if utils.is_sliver(boundary_geometry):
-                        surface_index = rsrf['surface_idx'][j]
-                        geom.surfaces[r_id]['surface_idx'].append(surface_index)
-                        continue
-                    
-                    pd_triangle = utils.makePolyData_surfaces([boundary_geometry])      # make it a polydata object
-                    pd_triangle = pd_triangle.compute_normals()                         # compute the normal
-                    # print(pd_triangle)
+                    # if utils.is_sliver(boundary_geometry):
+                    #     surface_index = rsrf['surface_idx'][j]
+                    #     geom.surfaces[r_id]['surface_idx'].append(surface_index)
+                    #     continue
 
-                    vnorm = pd_triangle['Normals'][0]      # The normal faces inward and is in ENU frame
+                    vnorm = mesh.cell_normals[j]
 
                     # Convert normal to point outward and in NED frame (swap and negate x and y)
                     vnorm = [-vnorm[1], -vnorm[0], vnorm[2]]
 
                     # Get the latitude value for the triangle.
-                    lat = utils.get_lat(proj, pd_triangle.center_of_mass())
+                    lat = utils.get_lat(proj, mesh.cell_centers()[j])
                     # print("Latitude:", lat)
 
                     # Sample a grid of points on the triangle.
-                    grid_points = create_surface_grid(pd_triangle, density)[0][0]     # The index it returns can be removed.
+                    # grid_points = create_surface_grid(pd_triangle, density)[0][0]     # The index it returns can be removed.
                     # print("Grid points:", grid_points)
 
                     h_avg = np.average(grid_points, 0)[2]
@@ -388,10 +390,11 @@ def main2():
         buildings_in_tile_list.append([path_file, cm, buildings])
 
     # Program settings:
-    cores = mp.cpu_count()-2    # do not use all cores
+    # cores = mp.cpu_count()-2    # do not use all cores
+    cores = 1
     lod = "2.2"                 # highest LoD available
     neighbour_offset = 150      # in meters
-    sampling_density = 3      # the lower the denser
+    sampling_density = 1      # the lower the denser
                                 # temporal resolution? Hourly? 10min?
 
     # Specify list of dates here and give as parameter to process_multiple_buildings:
