@@ -56,41 +56,92 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                 boundaries = geom.get_surface_boundaries(rsrf)
                 # Potential TODO after P4: do the triangulation here instead of for the whole file at once. This keeps track of what triangles belong to what surfaces.
 
+
+                # STELIOS' FIX BELOW
+                mesh = utils.makePolyData_surfaces(boundaries)
+
+                grid = create_surface_grid(mesh, density)
+                
+                points_list = []
+                index_list = []
+                for i, points in enumerate(grid):
+                    for p in points[0]:
+                        points_list.append(list(p))
+                        index_list.append(i)
+                
+                # print(index_list)
+                # print(points_list)
+                # print([list(p) for points in grid for p in points[0]])
+
+                # gp_mesh = pv.PolyData([list(p) for points in grid for p in points[0]])
+                gp_mesh = pv.PolyData(points_list)
+                # print(len(gp_mesh.points))
+                gp_mesh.point_data["surface_index"] = index_list
+                # <- Here you need to have for every point the index of the polygon that it belongs to
+
+                print(gp_mesh)
+                print(len(gp_mesh.points))
+                print(len(index_list))
+                print(gp_mesh.point_data["surface_index"])
+                # print(gp_mesh.points)
+                # print(gp_mesh.cell_arrays)
+                
+                # print(mesh.n_cells)
+                for j in range(mesh.n_cells):
+                    # TODO: integrate sliver check.
+                    vnorm = mesh.cell_normals[j]
+
+                    # Convert normal to point outward and in NED frame (swap and negate x and y)
+                    vnorm = [-vnorm[1], -vnorm[0], vnorm[2]]
+
+                    # print(mesh.cell_centers().points[j])
+
+                    # Get the latitude value for the triangle.
+                    lat = utils.get_lat(proj, mesh.cell_centers().points[j])
+
+                    # print(np.array(index_list) == j)
+                    grid_points = gp_mesh.extract_points(np.array(index_list) == j)
+                    # print(grid_points) 
+                    # <- Here you need code that based on the index of the triangle 
+                    # (j) only returns the points that belong to it
+
                 # Per surface (boundary_geometry) in boundaries (in this case triangle) I want:
                 # - normal vector -- Done
                 # - sampled grid points -- Done
                 # - to check whether it is sliver, if true skip and just return geom -- Half done
                 # - polydata object of it -- Done
-                for j, boundary_geometry in enumerate(boundaries):
-                    # boundary_geometry is a triangle (and should be a triangle)
-                    # In case the triangle is a sliver, it should be ignored in further processing, but stored as is in the geom.
-                    if utils.is_sliver(boundary_geometry):
-                        surface_index = rsrf['surface_idx'][j]
-                        geom.surfaces[r_id]['surface_idx'].append(surface_index)
-                        continue
+                # for j, boundary_geometry in enumerate(boundaries):
+                #     # boundary_geometry is a triangle (and should be a triangle)
+                #     # In case the triangle is a sliver, it should be ignored in further processing, but stored as is in the geom.
+                #     if utils.is_sliver(boundary_geometry):
+                #         surface_index = rsrf['surface_idx'][j]
+                #         geom.surfaces[r_id]['surface_idx'].append(surface_index)
+                #         continue
                     
-                    pd_triangle = utils.makePolyData_surfaces([boundary_geometry])      # make it a polydata object
-                    pd_triangle = pd_triangle.compute_normals()                         # compute the normal
-                    # print(pd_triangle)
+                #     pd_triangle = utils.makePolyData_surfaces([boundary_geometry])      # make it a polydata object
+                #     pd_triangle = pd_triangle.compute_normals()                         # compute the normal
+                #     # print(pd_triangle)
 
-                    vnorm = pd_triangle['Normals'][0]      # The normal faces inward and is in ENU frame
+                #     vnorm = pd_triangle['Normals'][0]      # The normal faces inward and is in ENU frame
 
-                    # Convert normal to point outward and in NED frame (swap and negate x and y)
-                    vnorm = [-vnorm[1], -vnorm[0], vnorm[2]]
+                #     # Convert normal to point outward and in NED frame (swap and negate x and y)
+                #     vnorm = [-vnorm[1], -vnorm[0], vnorm[2]]
 
-                    # Get the latitude value for the triangle.
-                    lat = utils.get_lat(proj, pd_triangle.center_of_mass())
-                    # print("Latitude:", lat)
+                #     # Get the latitude value for the triangle.
+                #     lat = utils.get_lat(proj, pd_triangle.center_of_mass())
+                #     # print("Latitude:", lat)
 
-                    # Sample a grid of points on the triangle.
-                    grid_points = create_surface_grid(pd_triangle, density)[0][0]     # The index it returns can be removed.
-                    # print("Grid points:", grid_points)
+                #     # Sample a grid of points on the triangle.
+                #     grid_points = create_surface_grid(pd_triangle, density)[0][0]     # The index it returns can be removed.
+                #     print("Grid points:", grid_points)
 
                     h_avg = np.average(grid_points, 0)[2]
                     if h_avg < 0:
                         h_avg = 0
                     # print("Average height:", h_avg)
 
+                    # TODO: Make newly created grid_points list compatible with code below.
+                    # TODO: incorporate Stelios' feedback.
                     pd_points_list = []
                     for point in grid_points:
                         point = pv.PolyData(point)
@@ -183,7 +234,7 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
     return co_id, co
 
 
-def process_multiple_buildings(cm_copy, buildings, buildings_all_tiles, rtree, cores, proj, lod, offset, density, datelist):
+def process_multiple_buildings(cm_copy, buildings_all_tiles, rtree, cores, proj, lod, offset, density, datelist):
     """
     Start the whole computation pipeline for multiple buildings within multiple processes.
     """
@@ -223,47 +274,48 @@ def process_multiple_buildings(cm_copy, buildings, buildings_all_tiles, rtree, c
                 futures.append(future)
 
             for future in futures:
+                print(future.result())
                 results.append(future.result())
     
     return results
                 
-def add_attributes_building(co, new_cos, lod):
-    children = co.children
-    print(children)
+# def add_attributes_building(co, new_cos, lod):
+#     children = co.children
+#     print(children)
 
-    if len(children) > 0:
-        child_id = children[0]
-        # child = cm_copy.cityobjects[child_id]
-        child = new_cos[child_id]
-        print(child)
-        geom = utils.get_lod(child, lod)
+#     if len(children) > 0:
+#         child_id = children[0]
+#         # child = cm_copy.cityobjects[child_id]
+#         child = new_cos[child_id]
+#         print(child)
+#         geom = utils.get_lod(child, lod)
         
-        sol_vals_building = []
-        attr_flag = False
-        for _, rsrf in geom.get_surfaces('roofsurface').items():
-            # print(rsrf)
-            if 'attributes' in rsrf.keys():
-                # print(rsrf['attributes'])
-                sol_val_avg = rsrf['attributes']['solar-potential_avg']
-                # print(sol_val_avg)
-                sol_vals_building.append(sol_val_avg)
-                attr_flag = True
+#         sol_vals_building = []
+#         attr_flag = False
+#         for _, rsrf in geom.get_surfaces('roofsurface').items():
+#             # print(rsrf)
+#             if 'attributes' in rsrf.keys():
+#                 # print(rsrf['attributes'])
+#                 sol_val_avg = rsrf['attributes']['solar-potential_avg']
+#                 # print(sol_val_avg)
+#                 sol_vals_building.append(sol_val_avg)
+#                 attr_flag = True
 
-        if attr_flag:
-            # compute statistics at building level
-            sol_val_avg_b = np.average(sol_vals_building)
-            sol_val_min = min(sol_vals_building)
-            sol_val_max = max(sol_vals_building)
-            sol_val_p50 = np.percentile(sol_vals_building, 50)
-            sol_val_p70 = np.percentile(sol_vals_building, 70)
+#         if attr_flag:
+#             # compute statistics at building level
+#             sol_val_avg_b = np.average(sol_vals_building)
+#             sol_val_min = min(sol_vals_building)
+#             sol_val_max = max(sol_vals_building)
+#             sol_val_p50 = np.percentile(sol_vals_building, 50)
+#             sol_val_p70 = np.percentile(sol_vals_building, 70)
 
-            co.attributes['solar-potential_avg'] = sol_val_avg_b
-            co.attributes['solar-potential_min'] = sol_val_min
-            co.attributes['solar-potential_max'] = sol_val_max
-            co.attributes['solar-potential_p50'] = sol_val_p50
-            co.attributes['solar-potential_p70'] = sol_val_p70
+#             co.attributes['solar-potential_avg'] = sol_val_avg_b
+#             co.attributes['solar-potential_min'] = sol_val_min
+#             co.attributes['solar-potential_max'] = sol_val_max
+#             co.attributes['solar-potential_p50'] = sol_val_p50
+#             co.attributes['solar-potential_p70'] = sol_val_p70
 
-    return co
+#     return co
 
 
 def write_cityjson(path, cm_copy, results, lod):
@@ -391,7 +443,7 @@ def main2():
     cores = mp.cpu_count()-2    # do not use all cores
     lod = "2.2"                 # highest LoD available
     neighbour_offset = 150      # in meters
-    sampling_density = 3      # the lower the denser
+    sampling_density = 3        # the lower the denser
                                 # temporal resolution? Hourly? 10min?
 
     # Specify list of dates here and give as parameter to process_multiple_buildings:
@@ -415,7 +467,7 @@ def main2():
         # process_multiple_buildings(cm_copy, buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
 
         # results = process_multiple_buildings(cm_copy, buildings, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
-        process_multiple_buildings(cm_copy, buildings, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
+        process_multiple_buildings(cm_copy, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
 
         print("Time to run the computations: {} seconds".format(time.time() - start_time))
 
@@ -424,7 +476,7 @@ def main2():
         # path_string = split_list[len(split_list)-1]
         # print(path.split('.')[0], path_string.split("."))
         
-        write_cityjson(path, cm_copy, results, lod)
+        # write_cityjson(path, cm_copy, results, lod)
         # utils.vtm_writer(results, path_string, write_mesh=False, write_grid=True, write_vector=False)
         
     print("Total time to run this script with writing to file(s): {} seconds".format(time.time() - start_time))
