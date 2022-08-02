@@ -5,7 +5,6 @@ These functions are not considered as the core workflow.
 
 import datetime as dt
 import math
-from pickle import NONE
 import numpy as np
 import pyvista as pv
 import solarpy as sp
@@ -163,7 +162,7 @@ def compute_azimuth(pt1, pt2):
     """
     return (180/math.pi) * math.atan2(pt2[0] - pt1[0], pt2[1] - pt1[1])
 
-def skip_on_azimuth(roof_center, neighbour, north_range=NONE):
+def skip_on_azimuth(roof_center, neighbour, north_range=None):
     """
     Filters potential neighbours on its azimuth.
     Neighbours in a certain northern range depending on the time of the year, can be ignored.

@@ -6,7 +6,6 @@ Complementary functions are found in utils.py
 """
 
 import datetime as dt
-import math
 import multiprocessing as mp
 import numpy as np
 import pyvista as pv
@@ -19,6 +18,8 @@ from copy import deepcopy
 from concurrent.futures import ProcessPoolExecutor
 from helpers.shape_index import create_surface_grid
 from multiprocessing import freeze_support
+from os import listdir
+from os.path import isfile, join
 from pyproj import Proj
 from rtree import index
 from tqdm import tqdm
@@ -69,26 +70,33 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                         points_list.append(list(p))
                         index_list.append(i)
                 
-                # print(index_list)
-                # print(points_list)
                 # print([list(p) for points in grid for p in points[0]])
 
                 # gp_mesh = pv.PolyData([list(p) for points in grid for p in points[0]])
                 gp_mesh = pv.PolyData(points_list)
-                # print(len(gp_mesh.points))
                 gp_mesh.point_data["surface_index"] = index_list
+                # print(gp_mesh.point_data["surface_index"][1])
                 # <- Here you need to have for every point the index of the polygon that it belongs to
+                # gp_mesh.point_data["sol_val_list_day_in_month"] = np.empty((gp_mesh.n_points, 1), object)
+                
+                # print(np.arange(gp_mesh.n_points))
+                # print(len(gp_mesh.points))
+                # print(len(index_list))
 
-                print(gp_mesh)
-                print(len(gp_mesh.points))
-                print(len(index_list))
-                print(gp_mesh.point_data["surface_index"])
+                # print(gp_mesh)
+                # print(gp_mesh.points)
+                # print(len(index_list))
+                # print(gp_mesh.point_data["surface_index"])
                 # print(gp_mesh.points)
                 # print(gp_mesh.cell_arrays)
                 
-                # print(mesh.n_cells)
+                # Loop over each triangle of the mesh.
                 for j in range(mesh.n_cells):
-                    # TODO: integrate sliver check.
+                    # TODO: integrate sliver check. Use utils.is_sliver()
+                    #     if utils.is_sliver(boundary_geometry):
+                    #         surface_index = rsrf['surface_idx'][j]
+                    #         geom.surfaces[r_id]['surface_idx'].append(surface_index)
+                    #         continue
                     vnorm = mesh.cell_normals[j]
 
                     # Convert normal to point outward and in NED frame (swap and negate x and y)
@@ -100,42 +108,13 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     lat = utils.get_lat(proj, mesh.cell_centers().points[j])
 
                     # print(np.array(index_list) == j)
-                    grid_points = gp_mesh.extract_points(np.array(index_list) == j)
-                    # print(grid_points) 
+                    grid_points = gp_mesh.extract_points(np.array(index_list) == j) # Returns pyVista unstructuredGrid, so a PolyData Object.
+                    # print(grid_points.points)
+                    # print(type(grid_points))
                     # <- Here you need code that based on the index of the triangle 
                     # (j) only returns the points that belong to it
 
-                # Per surface (boundary_geometry) in boundaries (in this case triangle) I want:
-                # - normal vector -- Done
-                # - sampled grid points -- Done
-                # - to check whether it is sliver, if true skip and just return geom -- Half done
-                # - polydata object of it -- Done
-                # for j, boundary_geometry in enumerate(boundaries):
-                #     # boundary_geometry is a triangle (and should be a triangle)
-                #     # In case the triangle is a sliver, it should be ignored in further processing, but stored as is in the geom.
-                #     if utils.is_sliver(boundary_geometry):
-                #         surface_index = rsrf['surface_idx'][j]
-                #         geom.surfaces[r_id]['surface_idx'].append(surface_index)
-                #         continue
-                    
-                #     pd_triangle = utils.makePolyData_surfaces([boundary_geometry])      # make it a polydata object
-                #     pd_triangle = pd_triangle.compute_normals()                         # compute the normal
-                #     # print(pd_triangle)
-
-                #     vnorm = pd_triangle['Normals'][0]      # The normal faces inward and is in ENU frame
-
-                #     # Convert normal to point outward and in NED frame (swap and negate x and y)
-                #     vnorm = [-vnorm[1], -vnorm[0], vnorm[2]]
-
-                #     # Get the latitude value for the triangle.
-                #     lat = utils.get_lat(proj, pd_triangle.center_of_mass())
-                #     # print("Latitude:", lat)
-
-                #     # Sample a grid of points on the triangle.
-                #     grid_points = create_surface_grid(pd_triangle, density)[0][0]     # The index it returns can be removed.
-                #     print("Grid points:", grid_points)
-
-                    h_avg = np.average(grid_points, 0)[2]
+                    h_avg = np.average(grid_points.points, 0)[2]
                     if h_avg < 0:
                         h_avg = 0
                     # print("Average height:", h_avg)
@@ -143,18 +122,19 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     # TODO: Make newly created grid_points list compatible with code below.
                     # TODO: incorporate Stelios' feedback.
                     pd_points_list = []
-                    for point in grid_points:
+                    for point in grid_points.points:
                         point = pv.PolyData(point)
                         point.add_field_data(vnorm, "vnorm_tr")
                         point.add_field_data([], "sol_val_list_day_in_month")
                         pd_points_list.append(point)
-
+                
                     for date in datelist:
                         sol_val = utils.irradiance_on_triangle(vnorm, h_avg, date[0], lat)
-
+                        
+                        # for gp in gp_mesh.points:
                         for pd_point in pd_points_list:
                             sun_path = utils.compute_sun_path(pd_point.points[0], proj, date[0])
-
+                            # print(sun_path)
                             intersection_index_list = []
                             for i, sun_point in enumerate(sun_path.points):
                                 for neighbour in neighbours:
@@ -164,9 +144,16 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                                         break
                             if len(intersection_index_list) > 0:
                                 sol_val = utils.irradiance_on_triangle(vnorm, h_avg, date[0], lat, skip_timestamp_indices=intersection_index_list)
-                        
+
+                            # print("hoi")
+                            # print(type(gp), gp)
+                            # gp["sol_val"] = sol_val
+                            # print("sol val: ", gp["sol_val"])
                             sol_val_list = np.append(pd_point["sol_val_list_day_in_month"], sol_val)
                             pd_point.add_field_data(sol_val_list, "sol_val_list_day_in_month")
+
+                    # grid_points.point_data["sol_val_year"] = []
+
 
                     for pd_point in pd_points_list:
                         # Write function to aggregate the daily values to monthly and yearly solar irradiation values.
@@ -176,20 +163,24 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     # sol_vals_building.extend(sol_vals)
 
                     # Compute statistics for surface/triangle.
-                    sol_val_avg = np.mean(sol_vals)
-                    if len(grid_points) > 1:
-                        sol_val_min = min(sol_vals)[0]
-                        sol_val_max = max(sol_vals)[0]
-                        sol_val_std = np.std(sol_vals)
-                        # print("sol_val_min: ", sol_val_min)
-                        # print("sol_val_max: ", sol_val_max)
-                        # print("sol_val_std: ", sol_val_std)
-                        if len(grid_points) > 2:
-                            sol_val_p50 = np.percentile(sol_vals, 50)
-                            sol_val_p70 = np.percentile(sol_vals, 70)
-                            # print("sol_val_p50: ", sol_val_p50)
-                            # print("sol_val_p70: ", sol_val_p70)
-                    # print("Average sol val year:", sol_val_avg)
+                    stats = {
+                        'solar-number_of_samples': len(grid_points.points),
+                        'solar-potential_avg': np.mean(sol_vals),
+                        'solar-potential_min': np.min(sol_vals),
+                        'solar-potential_max': np.max(sol_vals),
+                        'solar-potential_std': np.std(sol_vals),
+                        'solar-potential_p50': np.percentile(sol_vals, 50),
+                        'solar-potential_p70': np.percentile(sol_vals, 70),
+                        'solar-potential_unit': "Wh/m^2/year"
+                    }
+                    # sol_val_avg = np.mean(sol_vals)
+                    # if len(grid_points.points) > 1:
+                    #     sol_val_min = min(sol_vals)[0]
+                    #     sol_val_max = max(sol_vals)[0]
+                    #     sol_val_std = np.std(sol_vals)
+                    #     if len(grid_points.points) > 2:
+                    #         sol_val_p50 = np.percentile(sol_vals, 50)
+                    #         sol_val_p70 = np.percentile(sol_vals, 70)
 
                     # CREATION OF NEW SEMANTIC SURFACES:
                     surface_index = rsrf['surface_idx'][j]
@@ -201,16 +192,17 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     }
 
                     # CREATION OF NEW ATTRIBUTES FOR THE SEMANTIC SURFACES
-                    new_srf['attributes'] = {}
-                    new_srf['attributes']['solar-potential_avg'] = sol_val_avg
-                    if len(grid_points) > 1:
-                        new_srf['attributes']['solar-potential_min'] = sol_val_min
-                        new_srf['attributes']['solar-potential_max'] = sol_val_max
-                        new_srf['attributes']['solar-potential_std'] = sol_val_std
-                        if len(grid_points) > 2:
-                            new_srf['attributes']['solar-potential_p50'] = sol_val_p50
-                            new_srf['attributes']['solar-potential_p70'] = sol_val_p70
-                    new_srf['attributes']['solar-potential_unit'] = "Wh/m^2/year"
+                    new_srf['attributes'] = stats
+                    # new_srf['attributes'] = {}
+                    # new_srf['attributes']['solar-potential_avg'] = sol_val_avg
+                    # if len(grid_points.points) > 1:
+                    #     new_srf['attributes']['solar-potential_min'] = sol_val_min
+                    #     new_srf['attributes']['solar-potential_max'] = sol_val_max
+                    #     new_srf['attributes']['solar-potential_std'] = sol_val_std
+                    #     if len(grid_points.points) > 2:
+                    #         new_srf['attributes']['solar-potential_p50'] = sol_val_p50
+                    #         new_srf['attributes']['solar-potential_p70'] = sol_val_p70
+                    # new_srf['attributes']['solar-potential_unit'] = "Wh/m^2/year"
 
                     # Copy the existing attributes of the surface if applicable.
                     if 'attributes' in rsrf.keys():
@@ -218,7 +210,7 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                             new_srf['attributes'][key] = value
 
                     # print(new_srf['attributes'])
-                    
+                    # print("hoi")
                     max_id += 1
                     # print(max_id)
                     geom.surfaces[max_id] = new_srf
@@ -234,28 +226,28 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
     return co_id, co
 
 
-def process_multiple_buildings(cm_copy, buildings_all_tiles, rtree, cores, proj, lod, offset, density, datelist):
+def process_multiple_buildings(cm, buildings_all_tiles, rtree, cores, proj, lod, offset, density, datelist):
     """
     Start the whole computation pipeline for multiple buildings within multiple processes.
     """
     with ProcessPoolExecutor(max_workers=cores) as pool:
         # The library tqdm is used to display a progress bar in the terminal.
         # with tqdm(total=len(buildings)) as progress:      # might not need buildings anymore here.
-        with tqdm(total=len(cm_copy.cityobjects.items())) as progress:
+        with tqdm(total=len(cm.cityobjects.items())) as progress:
             futures = []
             results = [] 
 
             # First test this for a smaller CityJSON file.
             # TODO: create this file (cjio.subset) --> have it for one building now ('write_test_new_semantics')
-            for co_id, co in cm_copy.cityobjects.items():       # going over both 'Building' and 'BuildingPart'
+            for co_id, co in cm.cityobjects.items():       # going over both 'Building' and 'BuildingPart'
                 # print(co_id, co)
 
-                if cm_copy.cityobjects[co_id].type == 'Building':
-                    # results.append([co_id, co])
+                if cm.cityobjects[co_id].type == 'Building':
+                    results.append([co_id, co])
                     progress.update()
                     continue
                 
-                geom = utils.get_lod(cm_copy.cityobjects[co_id], lod)
+                geom = utils.get_lod(cm.cityobjects[co_id], lod)
                 # print(cm_copy.cityobjects[co_id])
                 # print(geom)
 
@@ -270,11 +262,10 @@ def process_multiple_buildings(cm_copy, buildings_all_tiles, rtree, cores, proj,
                 future = pool.submit(process_building, co_id, co, neighbours, proj, density, datelist)
                 future.add_done_callback(lambda p: progress.update())
 
-                # future contains a co (cityobject).
+                # future contains a co_id and co (cityobject).
                 futures.append(future)
 
             for future in futures:
-                print(future.result())
                 results.append(future.result())
     
     return results
@@ -318,7 +309,7 @@ def process_multiple_buildings(cm_copy, buildings_all_tiles, rtree, cores, proj,
 #     return co
 
 
-def write_cityjson(path, cm_copy, results, lod):
+def write_cityjson(path, cm, results, lod):
     new_cos = {}
     
     # for res in results:
@@ -334,7 +325,8 @@ def write_cityjson(path, cm_copy, results, lod):
     for res in results:
         co_id, co = res
         new_cos[co_id] = co
-            
+    
+    cm_copy = deepcopy(cm)
     cm_copy.cityobjects = new_cos
 
     # path_out = 'data/write/solarBAG_write_smaller_tile_faster_2.json'
@@ -413,31 +405,33 @@ def main2():
     # Start_time to keep track of the running time.
     start_time = time.time()
 
-    from os import listdir
-    from os.path import isfile, join
-
     # Load the CityJSON files from a path referring to a folder which is an argument passed to the python script.
     path_folder = sys.argv[1]
     cj_files = [file for file in listdir(path_folder) if isfile(join(path_folder, file))]
 
-    buildings_all_tiles = {}        # dict for all buildings in all tiles in the folder to make one rtree
+    # TODO: don't load all tiles all at once, only needed tiles.
+    # TODO: so change this to processing the tiles in the folder sequentially.
+    buildings_all_tiles = {}                # dict for all buildings in all tiles in the folder to make one rtree
     buildings_in_tile_list = []             # list to add the path of a tile and its buildings
     for file in cj_files:
         path_file = path_folder + file
+        path_file_out = path_folder + "output/" + file
         cm = cityjson.load(path_file)
 
         print("Citymodel is triangulated? ", cm.is_triangulated())
 
-        # TODO also get Buildings in order to write back to file.
+        # TODO also get Buildings in order to write back to file. Check whether this is already done.
         if cm.is_triangulated():
-            # Get the buildings from the city model as dict (there are only buildings).
+            # Get the buildings as BuildingPart (these contain LoD above 0) from the city model as dict (there are only buildings).
             buildings = cm.get_cityobjects(type='BuildingPart')
         else:
             cm.triangulate()
             buildings = cm.get_cityobjects(type='BuildingPart')
+
+        # TODO: write code to find the 8 neighbouring tiles and extract the buildings within a buffer from the tile edges. Add these buildings to the dictionary.
         
         buildings_all_tiles.update(buildings)
-        buildings_in_tile_list.append([path_file, cm, buildings])
+        buildings_in_tile_list.append([path_file_out, cm, buildings])
 
     # Program settings:
     cores = mp.cpu_count()-2    # do not use all cores
@@ -458,8 +452,8 @@ def main2():
         epsg = cm.get_epsg()
         proj = Proj(epsg)
 
-        # Create a copy of the citymodel
-        cm_copy = deepcopy(cm)
+        # Create a copy of the citymodel. TODO: find a way to not make a copy of cm.
+        # cm_copy = deepcopy(cm)
 
         # Process all buildings in the buildings dictionary.
         # results = process_multiple_buildings(cm_copy, buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
@@ -467,7 +461,8 @@ def main2():
         # process_multiple_buildings(cm_copy, buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
 
         # results = process_multiple_buildings(cm_copy, buildings, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
-        process_multiple_buildings(cm_copy, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
+        results = process_multiple_buildings(cm, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
+        # process_multiple_buildings(cm_copy, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
 
         print("Time to run the computations: {} seconds".format(time.time() - start_time))
 
@@ -476,7 +471,7 @@ def main2():
         # path_string = split_list[len(split_list)-1]
         # print(path.split('.')[0], path_string.split("."))
         
-        # write_cityjson(path, cm_copy, results, lod)
+        write_cityjson(path, cm, results, lod)
         # utils.vtm_writer(results, path_string, write_mesh=False, write_grid=True, write_vector=False)
         
     print("Total time to run this script with writing to file(s): {} seconds".format(time.time() - start_time))

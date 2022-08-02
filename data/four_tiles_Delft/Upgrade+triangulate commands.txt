@@ -1,0 +1,8 @@
+# Upgrade to v1.1
+cjio 3dbag_v210908_fd2cee53_5907.json upgrade save 3dbag_5907_v11.city.json
+
+# Triangulate
+cjio 3dbag_5907_v11.city.json triangulate save 3dbag_5907_v11_triangulated.city.json
+
+# JUST CHANGE THE NAMES FOR OTHER FILES
+# For the triangulate command --sloppy could be used.

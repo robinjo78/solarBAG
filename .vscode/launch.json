@@ -20,7 +20,8 @@
             "program": "solarBAG_CityJSON.py",
             "console": "integratedTerminal",
             "justMyCode": true,
-            "args": ["data/one_tile/"]
+            // "args": ["data/one_tile/"]
+            "args": ["data/debug/"]
         }
     ]
 } 

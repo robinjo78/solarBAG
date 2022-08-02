@@ -1,0 +1,10 @@
+Ran in 5668.974214315414 seconds ~ 1h40min
+
+Parameters:
+- 10 cores
+- neighbour offset 150m
+- sampling_density 3
+- whole year
+with intersection detection
+
+Writing to CityJSON
