@@ -40,7 +40,6 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
 
             # print(geom.get_surfaces()[0])
             for r_id, rsrf in geom.get_surfaces('roofsurface').items():
-                # print(r_id, rsrf)
 
                 # old_ids.append(r_id)
                 # del geom.surfaces[r_id]     # deletes the semantics of the surfaces
@@ -49,7 +48,7 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                 geom.surfaces[r_id] = {
                     'type': rsrf['type'], 
                     'surface_idx': [[]]
-                }     # THIS SEMANTIC SURFACE IS ONLY WRITTEN TO FILE WHEN THERE ARE SLIVERS, WHY???
+                }
 
                 if 'attributes' in rsrf.keys():
                     geom.surfaces[r_id]['attributes'] = rsrf['attributes']
@@ -59,36 +58,26 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
 
 
                 # STELIOS' FIX BELOW
+                # Create a PolyData mesh of the roof surface boundaries.
                 mesh = utils.makePolyData_surfaces(boundaries)
 
+                # Create a sampled grid of the roof surfaces of the mesh.
                 grid = create_surface_grid(mesh, density)
                 
                 points_list = []
                 index_list = []
+                # Create one list of all the points in the grid of all roof surfaces.
+                # Keep track of its index by filling a separate list of the same length.
                 for i, points in enumerate(grid):
                     for p in points[0]:
                         points_list.append(list(p))
                         index_list.append(i)
-                
-                # print([list(p) for points in grid for p in points[0]])
 
-                # gp_mesh = pv.PolyData([list(p) for points in grid for p in points[0]])
+                # Make the point list a PolyData object to be able to assign point data to the points.
                 gp_mesh = pv.PolyData(points_list)
-                gp_mesh.point_data["surface_index"] = index_list
-                # print(gp_mesh.point_data["surface_index"][1])
-                # <- Here you need to have for every point the index of the polygon that it belongs to
-                # gp_mesh.point_data["sol_val_list_day_in_month"] = np.empty((gp_mesh.n_points, 1), object)
-                
-                # print(np.arange(gp_mesh.n_points))
-                # print(len(gp_mesh.points))
-                # print(len(index_list))
 
-                # print(gp_mesh)
-                # print(gp_mesh.points)
-                # print(len(index_list))
-                # print(gp_mesh.point_data["surface_index"])
-                # print(gp_mesh.points)
-                # print(gp_mesh.cell_arrays)
+                # For every point on the mesh the index of the surface triangle that it belongs to is stored.
+                gp_mesh.point_data["surface_index"] = index_list
                 
                 # Loop over each triangle of the mesh.
                 for j in range(mesh.n_cells):
@@ -97,28 +86,25 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     #         surface_index = rsrf['surface_idx'][j]
                     #         geom.surfaces[r_id]['surface_idx'].append(surface_index)
                     #         continue
+
+                    # Compute the normal vector of the mesh cell (triangle)
                     vnorm = mesh.cell_normals[j]
 
                     # Convert normal to point outward and in NED frame (swap and negate x and y)
                     vnorm = [-vnorm[1], -vnorm[0], vnorm[2]]
 
-                    # print(mesh.cell_centers().points[j])
-
                     # Get the latitude value for the triangle.
                     lat = utils.get_lat(proj, mesh.cell_centers().points[j])
 
-                    # print(np.array(index_list) == j)
+                    # Only return the grid points that belong to the current surface triangle j.
                     grid_points = gp_mesh.extract_points(np.array(index_list) == j) # Returns pyVista unstructuredGrid, so a PolyData Object.
-                    # print(grid_points.points)
-                    # print(type(grid_points))
-                    # <- Here you need code that based on the index of the triangle 
-                    # (j) only returns the points that belong to it
-
+                    
+                    # Compute the average z-value (height) of the grid points.
                     h_avg = np.average(grid_points.points, 0)[2]
                     if h_avg < 0:
                         h_avg = 0
-                    # print("Average height:", h_avg)
 
+                    # No primary TODO
                     # TODO: Make newly created grid_points list compatible with code below.
                     # TODO: incorporate Stelios' feedback.
                     pd_points_list = []
@@ -128,13 +114,12 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                         point.add_field_data([], "sol_val_list_day_in_month")
                         pd_points_list.append(point)
                 
+                    # Loop to compute the solar potential value for the surface j for each month in the year.
                     for date in datelist:
                         sol_val = utils.irradiance_on_triangle(vnorm, h_avg, date[0], lat)
                         
-                        # for gp in gp_mesh.points:
                         for pd_point in pd_points_list:
                             sun_path = utils.compute_sun_path(pd_point.points[0], proj, date[0])
-                            # print(sun_path)
                             intersection_index_list = []
                             for i, sun_point in enumerate(sun_path.points):
                                 for neighbour in neighbours:
@@ -145,24 +130,17 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                             if len(intersection_index_list) > 0:
                                 sol_val = utils.irradiance_on_triangle(vnorm, h_avg, date[0], lat, skip_timestamp_indices=intersection_index_list)
 
-                            # print("hoi")
-                            # print(type(gp), gp)
-                            # gp["sol_val"] = sol_val
-                            # print("sol val: ", gp["sol_val"])
                             sol_val_list = np.append(pd_point["sol_val_list_day_in_month"], sol_val)
                             pd_point.add_field_data(sol_val_list, "sol_val_list_day_in_month")
-
-                    # grid_points.point_data["sol_val_year"] = []
-
 
                     for pd_point in pd_points_list:
                         # Write function to aggregate the daily values to monthly and yearly solar irradiation values.
                         utils.compute_yearly_solar_irradiance_point(pd_point, datelist)
                     
+                    # Create a list with the solar potential values of each point in the grid.
                     sol_vals = [pd_point['sol_val_year'] for pd_point in pd_points_list]
-                    # sol_vals_building.extend(sol_vals)
 
-                    # Compute statistics for surface/triangle.
+                    # Compute statistics for the surface/triangle.
                     stats = {
                         'solar-number_of_samples': len(grid_points.points),
                         'solar-potential_avg': np.mean(sol_vals),
@@ -173,18 +151,9 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                         'solar-potential_p70': np.percentile(sol_vals, 70),
                         'solar-potential_unit': "Wh/m^2/year"
                     }
-                    # sol_val_avg = np.mean(sol_vals)
-                    # if len(grid_points.points) > 1:
-                    #     sol_val_min = min(sol_vals)[0]
-                    #     sol_val_max = max(sol_vals)[0]
-                    #     sol_val_std = np.std(sol_vals)
-                    #     if len(grid_points.points) > 2:
-                    #         sol_val_p50 = np.percentile(sol_vals, 50)
-                    #         sol_val_p70 = np.percentile(sol_vals, 70)
 
                     # CREATION OF NEW SEMANTIC SURFACES:
                     surface_index = rsrf['surface_idx'][j]
-                    # print(surface_index)
 
                     new_srf = {
                         'type': rsrf['type'],
@@ -193,26 +162,13 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
 
                     # CREATION OF NEW ATTRIBUTES FOR THE SEMANTIC SURFACES
                     new_srf['attributes'] = stats
-                    # new_srf['attributes'] = {}
-                    # new_srf['attributes']['solar-potential_avg'] = sol_val_avg
-                    # if len(grid_points.points) > 1:
-                    #     new_srf['attributes']['solar-potential_min'] = sol_val_min
-                    #     new_srf['attributes']['solar-potential_max'] = sol_val_max
-                    #     new_srf['attributes']['solar-potential_std'] = sol_val_std
-                    #     if len(grid_points.points) > 2:
-                    #         new_srf['attributes']['solar-potential_p50'] = sol_val_p50
-                    #         new_srf['attributes']['solar-potential_p70'] = sol_val_p70
-                    # new_srf['attributes']['solar-potential_unit'] = "Wh/m^2/year"
 
                     # Copy the existing attributes of the surface if applicable.
                     if 'attributes' in rsrf.keys():
                         for key, value in rsrf['attributes'].items():
                             new_srf['attributes'][key] = value
 
-                    # print(new_srf['attributes'])
-                    # print("hoi")
                     max_id += 1
-                    # print(max_id)
                     geom.surfaces[max_id] = new_srf
             for srf in geom.surfaces.values():
                 if srf['surface_idx'] is None:
@@ -220,7 +176,6 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
             new_geoms.append(geom)
         else:
             new_geoms.append(geom)
-    # print(geom.surfaces)
     co.geometry = new_geoms
 
     return co_id, co
@@ -232,33 +187,29 @@ def process_multiple_buildings(cm, buildings_all_tiles, rtree, cores, proj, lod,
     """
     with ProcessPoolExecutor(max_workers=cores) as pool:
         # The library tqdm is used to display a progress bar in the terminal.
-        # with tqdm(total=len(buildings)) as progress:      # might not need buildings anymore here.
         with tqdm(total=len(cm.cityobjects.items())) as progress:
             futures = []
             results = [] 
 
-            # First test this for a smaller CityJSON file.
-            # TODO: create this file (cjio.subset) --> have it for one building now ('write_test_new_semantics')
+            # Loop over each city object in the city model.
             for co_id, co in cm.cityobjects.items():       # going over both 'Building' and 'BuildingPart'
-                # print(co_id, co)
-
                 if cm.cityobjects[co_id].type == 'Building':
                     results.append([co_id, co])
                     progress.update()
                     continue
                 
+                # Get the geometry of the city object.
                 geom = utils.get_lod(cm.cityobjects[co_id], lod)
-                # print(cm_copy.cityobjects[co_id])
-                # print(geom)
 
                 # Extract only roof surfaces from the building geometry.
-                # Might not extract roof_mesh as it is ONLY used as center point to find neighbours
+                # TODO: Potential speed-up: might not extract roof_mesh as it is ONLY used as center point to find neighbours
                 roof_mesh = utils.makePolyData_surfaces(utils.get_semantic_surfaces(geom, 'roofsurface'))
 
                 # Find the neighbours of the current mesh according to a certain offset value.
                 # Type polydata.
                 neighbours = utils.find_neighbours(id, roof_mesh, rtree, buildings_all_tiles, lod, offset)
                 
+                # Submit each building to a multiprocessing pool to process the building further.
                 future = pool.submit(process_building, co_id, co, neighbours, proj, density, datelist)
                 future.add_done_callback(lambda p: progress.update())
 
@@ -269,135 +220,24 @@ def process_multiple_buildings(cm, buildings_all_tiles, rtree, cores, proj, lod,
                 results.append(future.result())
     
     return results
-                
-# def add_attributes_building(co, new_cos, lod):
-#     children = co.children
-#     print(children)
 
-#     if len(children) > 0:
-#         child_id = children[0]
-#         # child = cm_copy.cityobjects[child_id]
-#         child = new_cos[child_id]
-#         print(child)
-#         geom = utils.get_lod(child, lod)
-        
-#         sol_vals_building = []
-#         attr_flag = False
-#         for _, rsrf in geom.get_surfaces('roofsurface').items():
-#             # print(rsrf)
-#             if 'attributes' in rsrf.keys():
-#                 # print(rsrf['attributes'])
-#                 sol_val_avg = rsrf['attributes']['solar-potential_avg']
-#                 # print(sol_val_avg)
-#                 sol_vals_building.append(sol_val_avg)
-#                 attr_flag = True
-
-#         if attr_flag:
-#             # compute statistics at building level
-#             sol_val_avg_b = np.average(sol_vals_building)
-#             sol_val_min = min(sol_vals_building)
-#             sol_val_max = max(sol_vals_building)
-#             sol_val_p50 = np.percentile(sol_vals_building, 50)
-#             sol_val_p70 = np.percentile(sol_vals_building, 70)
-
-#             co.attributes['solar-potential_avg'] = sol_val_avg_b
-#             co.attributes['solar-potential_min'] = sol_val_min
-#             co.attributes['solar-potential_max'] = sol_val_max
-#             co.attributes['solar-potential_p50'] = sol_val_p50
-#             co.attributes['solar-potential_p70'] = sol_val_p70
-
-#     return co
-
-
-def write_cityjson(path, cm, results, lod):
+def write_cityjson(path, cm, results):
     new_cos = {}
-    
-    # for res in results:
-    #     co_id, co = res
-    #     if co.type == 'BuildingPart':
-    #         new_cos[co_id] = co
-        
-    # for res in results:
-    #     if co.type == 'Building':
-    #         co = add_attributes_building(co, new_cos, lod)
-    #     new_cos[co_id] = co
 
+    # Assign each newly created city object (co) to its co_id in the co ditionary.
     for res in results:
         co_id, co = res
         new_cos[co_id] = co
     
+    # Create a deep copy of the city model for safety purposes.
     cm_copy = deepcopy(cm)
     cm_copy.cityobjects = new_cos
 
-    # path_out = 'data/write/solarBAG_write_smaller_tile_faster_2.json'
+    # Save the new city model to a new file.
     path_out = path.split('.')[0] + '_solar.city.json'
     cityjson.save(cm_copy, path_out)
 
-
-# def main():
-#     """
-#     Main workflow.
-#     """
-#     # Start_time to keep track of the running time.
-#     start_time = time.time()
-
-#     # Load the CityJSON file from a path which is an argument passed to the python script.
-#     path = sys.argv[1]
-#     cm = cityjson.load(path)
-
-#     print("Citymodel is triangulated? ", cm.is_triangulated())
-
-#     # TODO also get Buildings in order to write back to file.
-#     if cm.is_triangulated():
-#         # Get the buildings from the city model as dict (there are only buildings).
-#         buildings = cm.get_cityobjects(type='BuildingPart')
-#         print(type(buildings))
-#     else:
-#         cm.triangulate()
-#         buildings = cm.get_cityobjects(type='BuildingPart')
-
-#     # Extract epsg from the input file and get the projection object.
-#     epsg = cm.get_epsg()
-#     proj = Proj(epsg)
-
-#     # Program settings:
-#     cores = mp.cpu_count()-2    # do not use all cores
-#     lod = "2.2"                 # highest LoD available
-#     neighbour_offset = 150      # in meters
-#     sampling_density = 1.5      # the lower the denser
-#                                 # temporal resolution? Hourly? 10min?
-
-#     # Specify list of dates here and give as parameter to process_multiple_buildings:
-#     date_list = utils.create_date_list(2021)
-#     # date_list_june = list([date_list[5]])
-
-#     # Create rtree for quickly finding building objects.
-#     rtree_idx = utils.create_rtree(buildings, lod)
-
-#     # Create a copy of the citymodel
-#     cm_copy = deepcopy(cm)
-
-#     # Process all buildings in the buildings dictionary.
-#     # results = process_multiple_buildings(cm_copy, buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
-#     # results = process_multiple_buildings(buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list_june)
-#     # process_multiple_buildings(cm_copy, buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
-
-#     # TODO: run this to check if it works
-#     results = process_multiple_buildings(cm_copy, buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
-
-#     print("Time to run the computations: {} seconds".format(time.time() - start_time))
-
-#     # Adjust the path string for convenient and organised file writing purposes.
-#     split_list = path.split("/")
-#     path_string = split_list[len(split_list)-1]
-    
-#     write_cityjson(path, cm_copy, results)
-#     # utils.vtm_writer(results, path_string, write_mesh=False, write_grid=True, write_vector=False)
-    
-#     print("Total time to run this script with writing to file(s): {} seconds".format(time.time() - start_time))
-
-
-def main2():
+def main():
     """
     Main workflow.
     Test for multiple tiles (in a folder).
@@ -411,11 +251,15 @@ def main2():
 
     # TODO: don't load all tiles all at once, only needed tiles.
     # TODO: so change this to processing the tiles in the folder sequentially.
+    # NOTE: when testing, it is done for only one tile now, so the for loop below is just performed once now.
     buildings_all_tiles = {}                # dict for all buildings in all tiles in the folder to make one rtree
     buildings_in_tile_list = []             # list to add the path of a tile and its buildings
     for file in cj_files:
+        # Construct the path file to load and the output path file to write back to.
         path_file = path_folder + file
         path_file_out = path_folder + "output/" + file
+        
+        # Load the city model (cm) from the path to the file
         cm = cityjson.load(path_file)
 
         print("Citymodel is triangulated? ", cm.is_triangulated())
@@ -442,7 +286,6 @@ def main2():
 
     # Specify list of dates here and give as parameter to process_multiple_buildings:
     date_list = utils.create_date_list(2021)
-    # date_list_june = list([date_list[5]])
 
     # Create rtree for quickly finding building objects.
     rtree_idx = utils.create_rtree(buildings_all_tiles, lod)
@@ -452,33 +295,18 @@ def main2():
         epsg = cm.get_epsg()
         proj = Proj(epsg)
 
-        # Create a copy of the citymodel. TODO: find a way to not make a copy of cm.
-        # cm_copy = deepcopy(cm)
-
         # Process all buildings in the buildings dictionary.
-        # results = process_multiple_buildings(cm_copy, buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
-        # results = process_multiple_buildings(buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list_june)
-        # process_multiple_buildings(cm_copy, buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
-
-        # results = process_multiple_buildings(cm_copy, buildings, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
         results = process_multiple_buildings(cm, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
-        # process_multiple_buildings(cm_copy, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
-
+        
         print("Time to run the computations: {} seconds".format(time.time() - start_time))
 
-        # Adjust the path string for convenient and organised file writing purposes.
-        # split_list = path.split("/")
-        # path_string = split_list[len(split_list)-1]
-        # print(path.split('.')[0], path_string.split("."))
-        
-        write_cityjson(path, cm, results, lod)
-        # utils.vtm_writer(results, path_string, write_mesh=False, write_grid=True, write_vector=False)
+        # Write the enriched city model back to a cityJSON file.
+        write_cityjson(path, cm, results)
+        # utils.vtm_writer(results, path_string, write_mesh=False, write_grid=True, write_vector=False)     # Can be used for writing vtm/vtk. Function is not applicable.
         
     print("Total time to run this script with writing to file(s): {} seconds".format(time.time() - start_time))
-
     
 
 if __name__ == "__main__":
     freeze_support()
-    # main()
-    main2()
+    main()
