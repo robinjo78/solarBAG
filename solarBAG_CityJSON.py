@@ -81,11 +81,11 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                 
                 # Loop over each triangle of the mesh.
                 for j in range(mesh.n_cells):
-                    # TODO: integrate sliver check. Use utils.is_sliver()
-                    #     if utils.is_sliver(boundary_geometry):
-                    #         surface_index = rsrf['surface_idx'][j]
-                    #         geom.surfaces[r_id]['surface_idx'].append(surface_index)
-                    #         continue
+                    # Performs the sliver check and adds the surface as a semantic roof surface to the geom.
+                    if utils.is_sliver([mesh.extract_cells(j).points]):
+                        surface_index = rsrf['surface_idx'][j]
+                        geom.surfaces[r_id]['surface_idx'].append(surface_index)
+                        continue
 
                     # Compute the normal vector of the mesh cell (triangle)
                     vnorm = mesh.cell_normals[j]
@@ -142,6 +142,7 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
 
                     # Compute statistics for the surface/triangle.
                     stats = {
+                        'v_norm': str(vnorm),
                         'solar-number_of_samples': len(grid_points.points),
                         'solar-potential_avg': np.mean(sol_vals),
                         'solar-potential_min': np.min(sol_vals),
@@ -203,6 +204,7 @@ def process_multiple_buildings(cm, buildings_all_tiles, rtree, cores, proj, lod,
 
                 # Extract only roof surfaces from the building geometry.
                 # TODO: Potential speed-up: might not extract roof_mesh as it is ONLY used as center point to find neighbours
+                # Not true, it is also used for the height filter.
                 roof_mesh = utils.makePolyData_surfaces(utils.get_semantic_surfaces(geom, 'roofsurface'))
 
                 # Find the neighbours of the current mesh according to a certain offset value.
@@ -281,7 +283,7 @@ def main():
     cores = mp.cpu_count()-2    # do not use all cores
     lod = "2.2"                 # highest LoD available
     neighbour_offset = 150      # in meters
-    sampling_density = 3        # the lower the denser
+    sampling_density = 3        # the lower the denser. The density parameter is the interval (from a min to a max) in meters.
                                 # temporal resolution? Hourly? 10min?
 
     # Specify list of dates here and give as parameter to process_multiple_buildings:

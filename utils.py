@@ -296,6 +296,26 @@ def irradiance_on_triangle(vnorm, h, date, lat, skip_timestamp_indices=[]):
     """
     Computes the solar irradiance value for a triangle.
     """
+
+    # irradiance on triangle function understanding test:
+    # extraterrestrial_rad = sp.gon(date)
+    # prel = sp.pressure(h)/sp.pressure(0)
+    # theta_zenith = sp.theta_z(date, lat)
+    # m = sp.air_mass_kastenyoung1989(np.rad2deg(theta_zenith), h)
+    # alpha_int = 0.32
+
+    # G = extraterrestrial_rad * np.exp(-prel * m * alpha_int)
+
+
+    # print("Extraterrestrial radiation: ", extraterrestrial_rad)
+    # print("Pressure relation: ", prel)
+    # print("Pressure relation (neg): ", -prel)
+    # print("Air mass: ", m)
+    # print("Exp(-prel, m, 0.32): ", np.exp(-prel * m * alpha_int))
+    # print("G:", G)
+
+
+
     # t = [date + dt.timedelta(minutes=i) for i in range(0, 15 * 24 * 4, 15)]
     t = [date + dt.timedelta(minutes=i) for i in range(0, 60 * 24, 60)]
     G = [sp.irradiance_on_plane(vnorm, h, i, lat) for i in t]
