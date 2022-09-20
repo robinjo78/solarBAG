@@ -5,10 +5,10 @@ from numpy.lib.polynomial import poly
 from shapely.geometry import Point, MultiPoint, Polygon
 from helpers.geometry import surface_normal
 from helpers.mesh import to_pymesh, to_pyvista, intersect
-import miniball
+# import miniball
 import numpy as np
 import pyvista as pv
-import pymesh
+# import pymesh
 
 def circularity(shape):
     """Returns circularity 2D for a given polygon"""
@@ -379,7 +379,7 @@ def depth_3d(mesh, grid=None, density=1, check_surface=False):
     r = math.pow(3 * mesh.volume / (4 * math.pi), 1/3)
     return 4 * np.mean(np.absolute(dist["implicit_distance"])) / r
 
-from polylabel import polylabel
+# from polylabel import polylabel
 
 def largest_inscribed_circle(shape):
     """Returns the largest inscribed circle of a polygon in 2D"""

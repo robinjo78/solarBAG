@@ -18,8 +18,8 @@ from copy import deepcopy
 from concurrent.futures import ProcessPoolExecutor
 from helpers.shape_index import create_surface_grid
 from multiprocessing import freeze_support
-from os import listdir
-from os.path import isfile, join
+from os import listdir, makedirs
+from os.path import isfile, join, exists
 from pyproj import Proj
 from rtree import index
 from tqdm import tqdm
@@ -99,11 +99,20 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     # Only return the grid points that belong to the current surface triangle j.
                     grid_points = gp_mesh.extract_points(np.array(index_list) == j) # Returns pyVista unstructuredGrid, so a PolyData Object.
                     
+                    # Check whether there are grid points in the triangle. Otherwise Skip it and just prepare it for writing to file.
+                    if len(grid_points.points) == 0:
+                        surface_index = rsrf['surface_idx'][j]
+                        geom.surfaces[r_id]['surface_idx'].append(surface_index)
+                        continue
+
                     # Compute the average z-value (height) of the grid points.
                     h_avg = np.average(grid_points.points, 0)[2]
                     if h_avg < 0:
                         h_avg = 0
 
+                    # if not isinstance(h_avg, (int, float)):
+                    #     print(h_avg, type(h_avg), co_id, "grid_points list: ", grid_points.points, j, len(index_list))
+        
                     # No primary TODO
                     # TODO: Make newly created grid_points list compatible with code below.
                     # TODO: incorporate Stelios' feedback.
@@ -116,7 +125,8 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                 
                     # Loop to compute the solar potential value for the surface j for each month in the year.
                     for date in datelist:
-                        sol_val = utils.irradiance_on_triangle(vnorm, h_avg, date[0], lat)
+                        sol_val = utils.irradiance_on_triangle(vnorm, h_avg, date[0], lat)  # An error occurs for h_avg: 'altitude should be "float" or "int"'
+                                                                                            # When tile 5801 is processed.
                         
                         for pd_point in pd_points_list:
                             sun_path = utils.compute_sun_path(pd_point.points[0], proj, date[0])
@@ -140,12 +150,23 @@ def process_building(co_id, co, neighbours, proj, density, datelist):
                     # Create a list with the solar potential values of each point in the grid.
                     sol_vals = [pd_point['sol_val_year'] for pd_point in pd_points_list]
 
+                    # Workaround for ValueError with (np.min)
+                    # Just skip the building.... But is this okay, doesn't it give problems when writing to file?
+                    # Or write an alternative stats dict.
+                    try:
+                        sol_val_min = np.min(sol_vals)
+                    except:
+                        sol_val_min = "invalid"
+                        continue
+
+                    # print(sol_vals, sol_val_min, co_id, r_id)
+
                     # Compute statistics for the surface/triangle.
                     stats = {
                         'v_norm': str(vnorm),
                         'solar-number_of_samples': len(grid_points.points),
                         'solar-potential_avg': np.mean(sol_vals),
-                        'solar-potential_min': np.min(sol_vals),
+                        'solar-potential_min': sol_val_min,
                         'solar-potential_max': np.max(sol_vals),
                         'solar-potential_std': np.std(sol_vals),
                         'solar-potential_p50': np.percentile(sol_vals, 50),
@@ -251,11 +272,31 @@ def main():
     path_folder = sys.argv[1]
     cj_files = [file for file in listdir(path_folder) if isfile(join(path_folder, file))]
 
+    if not exists(path_folder + "output/"):
+        makedirs(path_folder + "output/")
+    
+    # Extract the bounding boxes of all tiles in the input folder and store in an rtree.
+    tile_bboxes = utils.find_bbox_all_tiles(cj_files, path_folder)
+    r_tree_idx_tile_bbox = utils.create_rtree_tile_bbox(tile_bboxes)
+
+    # Program settings:
+    cores = mp.cpu_count()-2    # do not use all cores
+    lod = "2.2"                 # highest LoD available
+    # neighbour_offset = 150      # in meters   # default
+    neighbour_offset = 20       # altered
+    sampling_density = 3        # the lower the denser. The density parameter is the interval (from a min to a max) in meters.
+                                # temporal resolution? Hourly? 10min?
+    print("Settings: \nNeighbour offset: {}\nSampling density: {}".format(neighbour_offset, sampling_density))
+
+    # Specify list of dates here and give as parameter to process_multiple_buildings:
+    date_list = utils.create_date_list(2021)
+
+
     # TODO: don't load all tiles all at once, only needed tiles.
     # TODO: so change this to processing the tiles in the folder sequentially.
     # NOTE: when testing, it is done for only one tile now, so the for loop below is just performed once now.
-    buildings_all_tiles = {}                # dict for all buildings in all tiles in the folder to make one rtree
-    buildings_in_tile_list = []             # list to add the path of a tile and its buildings
+    # buildings_all_tiles = {}                # dict for all buildings in all tiles in the folder to make one rtree
+    # buildings_in_tile_list = []             # list to add the path of a tile and its buildings
     for file in cj_files:
         # Construct the path file to load and the output path file to write back to.
         path_file = path_folder + file
@@ -264,47 +305,73 @@ def main():
         # Load the city model (cm) from the path to the file
         cm = cityjson.load(path_file)
 
-        print("Citymodel is triangulated? ", cm.is_triangulated())
+        print("Citymodel {} is triangulated? {}".format(file, cm.is_triangulated()))
 
         # TODO also get Buildings in order to write back to file. Check whether this is already done.
-        if cm.is_triangulated():
-            # Get the buildings as BuildingPart (these contain LoD above 0) from the city model as dict (there are only buildings).
-            buildings = cm.get_cityobjects(type='BuildingPart')
-        else:
-            cm.triangulate()
-            buildings = cm.get_cityobjects(type='BuildingPart')
-
-        # TODO: write code to find the 8 neighbouring tiles and extract the buildings within a buffer from the tile edges. Add these buildings to the dictionary.
+        # Hugo says that 'try-catching' the triangulation error does not work (as it is a Segmentation Fault)
+        # Triangulate does not triangulate the tile, so do it as preprocessing.
+        if not cm.is_triangulated():
+            try:
+                cm.triangulate(False)
+            except:
+                print("Tile {} could not be triangulated. \nThis tile will be skipped.".format(file))
+                continue    # to next file.
+        # break
+        # Get the buildings as BuildingPart (these contain LoD above 0) from the city model as dict (there are only buildings).
+        buildings = cm.get_cityobjects(type='BuildingPart')
+        nb_buildings = buildings    # copy the buildings dict into the nb_buildings dict where buildings from other tiles will also be inserted.
         
-        buildings_all_tiles.update(buildings)
-        buildings_in_tile_list.append([path_file_out, cm, buildings])
+        # Find the tiles that are direct neighbours of the current tile.
+        bbox = cm.get_bbox()
+        buffer_box = [bbox[0]-100, bbox[1]-100, bbox[3]+100, bbox[4]+100]
+        hits = list(r_tree_idx_tile_bbox.intersection(buffer_box, objects="True"))
 
-    # Program settings:
-    cores = mp.cpu_count()-2    # do not use all cores
-    lod = "2.2"                 # highest LoD available
-    neighbour_offset = 150      # in meters
-    sampling_density = 3        # the lower the denser. The density parameter is the interval (from a min to a max) in meters.
-                                # temporal resolution? Hourly? 10min?
+        for item in hits:
+            path_nb = item.object
+            if path_nb != path_file:
+                cm_nb = cityjson.load(path_nb)
+                # print("hoi, een buurtegel is mogelijk belemmerend")
+                print("Tile {} is a potential blocking neighbour".format(path_nb))
+                nb_buildings = utils.build_nb_dict(nb_buildings, cm_nb, buffer_box)
+        
+        # Everything belonging to one file/tile should go here below:
+        # Create rtree for quickly finding building objects.
+        rtree_idx = utils.create_rtree(nb_buildings, lod)
 
-    # Specify list of dates here and give as parameter to process_multiple_buildings:
-    date_list = utils.create_date_list(2021)
-
-    # Create rtree for quickly finding building objects.
-    rtree_idx = utils.create_rtree(buildings_all_tiles, lod)
-    
-    for path, cm, buildings in buildings_in_tile_list:
         # Extract epsg from the input file and get the projection object.
         epsg = cm.get_epsg()
         proj = Proj(epsg)
 
         # Process all buildings in the buildings dictionary.
-        results = process_multiple_buildings(cm, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
+        results = process_multiple_buildings(cm, nb_buildings, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
         
         print("Time to run the computations: {} seconds".format(time.time() - start_time))
 
         # Write the enriched city model back to a cityJSON file.
-        write_cityjson(path, cm, results)
-        # utils.vtm_writer(results, path_string, write_mesh=False, write_grid=True, write_vector=False)     # Can be used for writing vtm/vtk. Function is not applicable.
+        write_cityjson(path_file_out, cm, results)
+
+        # buildings_all_tiles.update(buildings)
+        # buildings_in_tile_list.append([path_file_out, cm, buildings])
+
+
+    
+
+    # Create rtree for quickly finding building objects.
+    # rtree_idx = utils.create_rtree(buildings_all_tiles, lod)
+    
+    # for path, cm, buildings in buildings_in_tile_list:
+    #     # Extract epsg from the input file and get the projection object.
+    #     epsg = cm.get_epsg()
+    #     proj = Proj(epsg)
+
+    #     # Process all buildings in the buildings dictionary.
+    #     results = process_multiple_buildings(cm, buildings_all_tiles, rtree_idx, cores, proj, lod, neighbour_offset, sampling_density, date_list)
+        
+    #     print("Time to run the computations: {} seconds".format(time.time() - start_time))
+
+    #     # Write the enriched city model back to a cityJSON file.
+    #     write_cityjson(path, cm, results)
+    #     # utils.vtm_writer(results, path_string, write_mesh=False, write_grid=True, write_vector=False)     # Can be used for writing vtm/vtk. Function is not applicable.
         
     print("Total time to run this script with writing to file(s): {} seconds".format(time.time() - start_time))
     

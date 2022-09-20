@@ -1,5 +1,6 @@
 """Module with functions for 3D geometrical operations"""
 
+from cmath import nan
 import numpy as np
 import mapbox_earcut as earcut
 import pyvista as pv
@@ -14,10 +15,14 @@ def surface_normal(poly):
         n[1] += (v_curr[2] - v_next[2]) * (v_curr[0] + v_next[0])
         n[2] += (v_curr[0] - v_next[0]) * (v_curr[1] + v_next[1])
 
-    if all([c == 0 for c in n]):
-        raise ValueError("No normal. Possible colinear points!")
+    # if all([c == 0 for c in n]):
+    #     raise ValueError("No normal. Possible colinear points!")
 
     normalised = [i/np.linalg.norm(n) for i in n]
+    
+    # Workaround when normalised list is invalid.
+    if np.isnan(normalised).all():
+        return [1.0, 1.0, 1.0]
 
     return normalised
 

@@ -4,6 +4,7 @@ These functions are not considered as the core workflow.
 """
 
 import datetime as dt
+import json
 import math
 import numpy as np
 import pyvista as pv
@@ -12,6 +13,93 @@ import solarpy as sp
 from cjio import cityjson
 from rtree import index
 
+
+def find_bbox_all_tiles(cj_files, path_folder):
+    """
+    Searches for the metadata tag in all tiles in the folder.
+    Then, it extracts the geographical extent from the metadata.
+    It returns a list containing the 2D bboxes of the tile.
+    """
+    tile_bboxes = []
+    for file in cj_files:
+        path_file = path_folder + file
+        f = open(path_file, "r")
+        s = f.read()
+        #-- find "metadata"
+        posm = s.find("metadata")
+        pos_start = s.find("{", posm)
+        pos_end = 0
+        cur = pos_start
+        count = 1
+        while True:
+            a = s.find("{", cur+1) 
+            b = s.find("}", cur+1) 
+            if a < b: 
+                count += 1
+                cur = a
+            else: 
+                count -= 1
+                cur = b
+            if count == 0:
+                pos_end = b
+                break
+        m = s[pos_start:pos_end+1]
+        jm = json.loads(m)
+
+        c1 = jm['geographicalExtent'][0:2]
+        c2 = jm['geographicalExtent'][3:5]
+        bbox_2D = c1 + c2
+
+        tile_bboxes.append((path_file, bbox_2D))
+
+    return tile_bboxes
+
+def create_rtree_tile_bbox(tile_bboxes):
+    # Set properties for the rtree index.
+    p = index.Property()
+    p.dimension = 2     # 2D is sufficient.
+
+    # Create empty rtree for the bounding boxes of a tile
+    rtree_idx_tile = index.Index(properties=p)
+
+    # Loop to dump all tile's bboxes in the rtree.
+    for i, tile in enumerate(tile_bboxes, 0):
+        path = tile[0]
+        bbox = tile[1]
+        # Insert the bbox into the rtree with the tile's file path as object (obj).
+        rtree_idx_tile.insert(i, bbox, obj=path)
+
+    print("Size of the Rtree for tile bboxes: {}".format(rtree_idx_tile.get_size()))
+    
+    return rtree_idx_tile
+
+# This function gradually builds the dictionary with all potential neighbours for a tile.
+# This includes buildings from neighbouring tiles.
+def build_nb_dict(nb_buildings, cm_nb, buffer_box):
+    # Create an r-tree of cm_nb'
+    buildings = cm_nb.get_cityobjects(type='BuildingPart')
+
+    lod = "2.2"     # In solarBAG this is already initialised.
+    rtree_idx_nb = create_rtree(buildings, lod)
+    # print("Nb rtree:", rtree_idx_nb)
+
+    # Adjust 2D buffer box to 3D to be compatible with 3D rtree.
+    buffer_box_3d = [buffer_box[0], buffer_box[1], -100, buffer_box[2], buffer_box[3], 100]
+
+    # Find the buildings in each neighbouring tile that is situated within the buffer box limits.
+    hits = list(rtree_idx_nb.intersection(buffer_box_3d, objects="True"))
+    print("Number of buildings within buffer:", len(hits))
+
+    # Put all the buildings in hits in the nb_buildings dict
+    for item in hits:
+        bdg_id = item.object
+        bdg_obj = buildings[bdg_id]
+
+        # Add the building from a neighbouring tile to the nb_buildings dict
+        # Use its id as key and the actual building object as value.
+        nb_buildings[bdg_id] = bdg_obj
+    
+    return nb_buildings
 
 def create_date_list(year, c_day=21, months=12):
     """
